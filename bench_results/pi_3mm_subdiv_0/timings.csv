@@ -1,0 +1,17 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.067878,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+adjacency,s4,0.000025,nan,,error,TypeError: compute_adjacency() missing 1 required positional argument: 'already_run',model=pi 3mm;n_cells=25280;n_points=7973
+smoothing,s5,1.328197,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+smoothing,s4,1.480855,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+deformation,s5,0.810784,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+deformation,s4,1.564569,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+adjacency,s5,0.075383,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+adjacency,s4,0.000025,nan,,error,TypeError: compute_adjacency() missing 1 required positional argument: 'already_run',model=pi 3mm;n_cells=25280;n_points=7973
+adjacency,s5,0.083429,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+adjacency,s4,0.000022,nan,,error,TypeError: compute_adjacency() missing 1 required positional argument: 'already_run',model=pi 3mm;n_cells=25280;n_points=7973
+vertex_rotation,s5,0.488077,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+vertex_rotation,s4,7.151214,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+volume_scales,s5,0.365708,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+volume_scales,s4,7.175172,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+barycentric,s5,0.973682,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973
+barycentric,s4,79.931546,nan,,ok,,model=pi 3mm;n_cells=25280;n_points=7973

@@ -1,0 +1,6 @@
+stage,metric,max_abs,rms,cosine_mean,pearson_r,n_compared,nan_disagree,context
+smoothing,scalar_compare,4.245441328099009e-05,1.2234323369672707e-05,,0.9999999999028986,25280,0,model=pi 3mm;n_cells=25280;n_points=7973
+deformation,vector_compare,6.685389618471322,2.9486674136419895,0.9937845355257802,,7973,,model=pi 3mm;n_cells=25280;n_points=7973
+vertex_rotation,scalar_compare,1.8927337475105332e-09,7.445227229503814e-11,,1.0,7973,0,model=pi 3mm;n_cells=25280;n_points=7973
+volume_scales,scalar_compare,0.0,0.0,,1.0,25280,0,model=pi 3mm;n_cells=25280;n_points=7973
+barycentric,vector_compare,1.0362720145727757,0.6318555810573223,nan,,154614,,model=pi 3mm;n_cells=25280;n_points=7973

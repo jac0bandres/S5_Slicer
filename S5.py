@@ -21,17 +21,41 @@ warnings.simplefilter('ignore')
 CURA_LOGS_DIR = os.path.abspath('./cura_logs')
 
 from s5_viz import viz, VizConfig
+from s5_bench import bench, BenchConfig
+import s4_reference as s4ref
+
 VizConfig.enabled = True
 VizConfig.output_dir = './plots'
 VizConfig.interactive = False
 
+BenchConfig.enabled = False
+BenchConfig.output_dir = './bench_results'
+BenchConfig.run_tag = 'pi_3mm_subdiv_0'
+BenchConfig.run_s4_comparison = True
+BenchConfig.record_correctness = True
+BenchConfig.track_memory = False
 
 total_time = time.time()
 plotter = pv.Plotter()
 
-def sigmoid(x, steep=1.0):
-    return 2 / (1 + np.exp(-steep*x)) - 1
+def infer_rotation_multiplier(tet, base_multiplier=2.0):
+    # Get the distribution of overhang angles
+    overhangs = tet.cell_data['overhang_angle']
+    # Filter for valid surface faces
+    valid_overhangs = overhangs[~np.isnan(overhangs)]
+    
+    if len(valid_overhangs) == 0:
+        return base_multiplier
 
+    # If the mesh has many extreme overhangs, reduce the multiplier 
+    # to prevent "over-tilting" which causes mesh destruction.
+    max_ov = np.rad2deg(np.nanmax(valid_overhangs))
+    
+    if max_ov > 135: # Very steep/in-air sections
+        return base_multiplier * 0.7
+    elif max_ov < 100: # Shallow overhangs
+        return base_multiplier * 1.5
+    return base_multiplier
 
 def slice(model_path, 
           config_path, 
@@ -48,6 +72,7 @@ def slice(model_path,
           ):
     total_t = time.time()
     prev_time = total_t
+
     if model_path:
         model_name = os.path.basename(model_path).split('.')[0]
         print(f'Slicing {model_name}...')
@@ -66,25 +91,19 @@ def slice(model_path,
 
     mesh = o3d.io.read_triangle_mesh(model_path)
     
-    TARGET_TRIANGLES = 10000 
-    current_triangles = len(mesh.triangles)
-    print(current_triangles)
-    
-    if current_triangles < TARGET_TRIANGLES:
-        factor_needed = TARGET_TRIANGLES / current_triangles
-        iterations = int(np.ceil(np.log(factor_needed) / np.log(4)))
-        
-        iterations = min(iterations, 3) 
-        
-        if iterations > 0:
-            mesh = mesh.subdivide_midpoint(number_of_iterations=iterations)
-            print(f"Subdivided mesh {iterations} times. New triangle count: {len(mesh.triangles)}")
+    # mesh = mesh.subdivide_midpoint(number_of_iterations=iterations)
 
     input_tet = tetgen.TetGen(np.asarray(mesh.vertices), np.asarray(mesh.triangles))
     input_tet.tetrahedralize()
 
     input_tet = input_tet.grid
     input_tet = input_tet.scale(scale)
+
+    bench.set_global_context(
+        model=model_path.split('/')[-1].rsplit('.', 1)[0],
+        n_cells=input_tet.number_of_cells,
+        n_points=input_tet.number_of_points
+    )
     
 
     PART_OFFSET = np.array(offset)
@@ -182,59 +201,68 @@ def slice(model_path,
         return cell_distance_to_bottom, cell_gradient
 
     def update_tet_attributes(tet):
-        print("updating tet attributes...")
-        curr_t = time.time()
-        surface_mesh = tet.extract_surface()
-        cell_to_face = decode_object(tet.field_data["cell_to_face"])
+        with bench.stage('adjacency'):
+            print("updating tet attributes...")
+            curr_t = time.time()
+            surface_mesh = tet.extract_surface()
+            cell_to_face = decode_object(tet.field_data["cell_to_face"])
 
-        cells = tet.cells.reshape(-1, 5)[:, 1:]
-        tet.add_field_data(cells, "cells")
-        cell_vertices = tet.points
-        tet.add_field_data(cell_vertices, "cell_vertices")
-        faces = surface_mesh.faces.reshape(-1, 4)[:, 1:]
-        tet.add_field_data(faces, "faces")
-        face_vertices = surface_mesh.points
-        tet.add_field_data(face_vertices, "face_vertices")
+            cells = tet.cells.reshape(-1, 5)[:, 1:]
+            tet.add_field_data(cells, "cells")
+            cell_vertices = tet.points
+            tet.add_field_data(cell_vertices, "cell_vertices")
+            faces = surface_mesh.faces.reshape(-1, 4)[:, 1:]
+            tet.add_field_data(faces, "faces")
+            face_vertices = surface_mesh.points
+            tet.add_field_data(face_vertices, "face_vertices")
 
-        tet.cell_data['face_normal'] = np.full((tet.number_of_cells, 3), np.nan)
-        keys = list(cell_to_face.keys())
-        values = list(cell_to_face.values())
-        all_face_indices = np.concatenate(values)
-        cell_counts = [len(f) for f in values]
-        all_cell_ids = np.repeat(keys, cell_counts)
-        all_normals = surface_mesh.face_normals[all_face_indices]
-        sort_idx = np.lexsort((all_normals[:, 2], all_cell_ids))
-        sorted_ids = all_cell_ids[sort_idx]
-        sorted_normals = all_normals[sort_idx]
-        unique_ids, first_indices = np.unique(sorted_ids, return_index=True)
-        tet.cell_data['face_normal'][unique_ids] = sorted_normals[first_indices]
-        final_normals = tet.cell_data['face_normal']
-        tet.cell_data['face_normal'] = final_normals / np.clip(np.linalg.norm(final_normals, axis=1)[:, None], 1e-15, None)
+            tet.cell_data['face_normal'] = np.full((tet.number_of_cells, 3), np.nan)
+            keys = list(cell_to_face.keys())
+            values = list(cell_to_face.values())
+            all_face_indices = np.concatenate(values)
+            cell_counts = [len(f) for f in values]
+            all_cell_ids = np.repeat(keys, cell_counts)
+            all_normals = surface_mesh.face_normals[all_face_indices]
+            sort_idx = np.lexsort((all_normals[:, 2], all_cell_ids))
+            sorted_ids = all_cell_ids[sort_idx]
+            sorted_normals = all_normals[sort_idx]
+            unique_ids, first_indices = np.unique(sorted_ids, return_index=True)
+            tet.cell_data['face_normal'][unique_ids] = sorted_normals[first_indices]
+            final_normals = tet.cell_data['face_normal']
+            tet.cell_data['face_normal'] = final_normals / np.clip(np.linalg.norm(final_normals, axis=1)[:, None], 1e-15, None)
 
-        tet.cell_data['face_center'] = np.empty((tet.number_of_cells, 3))
-        tet.cell_data['face_center'][:,:] = np.nan
-        surface_mesh_cell_centers = surface_mesh.cell_centers().points
+            tet.cell_data['face_center'] = np.empty((tet.number_of_cells, 3))
+            tet.cell_data['face_center'][:,:] = np.nan
+            surface_mesh_cell_centers = surface_mesh.cell_centers().points
 
-        all_centers = surface_mesh_cell_centers[all_face_indices]
-        sort_idx_centers = np.lexsort((all_centers[:, 2], all_cell_ids))
-        sorted_ids_centers = all_cell_ids[sort_idx_centers]
-        sorted_centers = all_centers[sort_idx_centers]
-        _, first_indices_centers = np.unique(sorted_ids_centers, return_index=True)
+            all_centers = surface_mesh_cell_centers[all_face_indices]
+            sort_idx_centers = np.lexsort((all_centers[:, 2], all_cell_ids))
+            sorted_ids_centers = all_cell_ids[sort_idx_centers]
+            sorted_centers = all_centers[sort_idx_centers]
+            _, first_indices_centers = np.unique(sorted_ids_centers, return_index=True)
 
-        tet.cell_data['face_center'] = np.full((tet.number_of_cells, 3), np.nan)
-        tet.cell_data['face_center'][keys] = sorted_centers[first_indices_centers]
+            tet.cell_data['face_center'] = np.full((tet.number_of_cells, 3), np.nan)
+            tet.cell_data['face_center'][keys] = sorted_centers[first_indices_centers]
 
-        tet.cell_data['cell_center'] = tet.cell_centers().points
-        bottom_cell_threshold = np.nanmin(tet.cell_data['face_center'][:, 2]) + 0.3
-        bottom_cells_mask = tet.cell_data['face_center'][:, 2] < bottom_cell_threshold
-        tet.cell_data['is_bottom'] = bottom_cells_mask
-        bottom_cells = np.where(bottom_cells_mask)[0]
-        face_normals = tet.cell_data['face_normal'].copy()
-        face_normals[bottom_cells_mask] = np.nan
-        dots = np.sum(face_normals * up_vector, axis=1)
-        tet.cell_data['overhang_angle'] = np.arccos(np.clip(dots, -1.0, 1.0))
+            tet.cell_data['cell_center'] = tet.cell_centers().points
+            bottom_cell_threshold = np.nanmin(tet.cell_data['face_center'][:, 2]) + 0.3
+            bottom_cells_mask = tet.cell_data['face_center'][:, 2] < bottom_cell_threshold
+            tet.cell_data['is_bottom'] = bottom_cells_mask
+            bottom_cells = np.where(bottom_cells_mask)[0]
+            face_normals = tet.cell_data['face_normal'].copy()
+            face_normals[bottom_cells_mask] = np.nan
+            dots = np.sum(face_normals * up_vector, axis=1)
+            tet.cell_data['overhang_angle'] = np.arccos(np.clip(dots, -1.0, 1.0))
 
-        print(f'{time.time()-curr_t}')
+            print(f'{time.time()-curr_t}')
+            face_edges_s5 = tet.field_data['cell_face_neighbours']
+
+        bench.reference(
+            'adjacency',
+            s4=lambda: s4ref.compute_adjacency(tet)['face'],
+            s5_result=face_edges_s5,
+            correctness=bench.compare_edge_sets
+        )
         return tet
 
     def calculate_tet_attributes(tet):
@@ -294,41 +322,27 @@ def slice(model_path,
     undeformed_tet = input_tet.copy()
     viz.overhang_analysis(input_tet)
     def calculate_path_length_to_base_gradient(tet, MAX_OVERHANG,
-                                           INITIAL_ROTATION_FIELD_SMOOTHING,
-                                           SET_INITIAL_ROTATION_TO_ZERO):
-        grad = tet.cell_data['surface_gradient']
+                                                INITIAL_ROTATION_FIELD_SMOOTHING,
+                                                SET_INITIAL_ROTATION_TO_ZERO):
+        grad = tet.cell_data['surface_gradient']  # already unit vectors from build_surface_geodesic_field
         cc   = tet.cell_data['cell_center']
+        dist = tet.cell_data['surface_distance']
         
-        # 1. ROBUST SCALE: Use the standard deviation of the XY footprint
-        # This is more stable than 'bounds' for organic or rotated shapes.
-        xy_coords = cc[:, :2]
-        # Calculate the spread (standard deviation) in X and Y
-        # The '2 * sigma' of the distribution is a great proxy for "characteristic width"
-        xy_std = np.std(xy_coords, axis=0)
-        char_length = np.linalg.norm(xy_std) * 2.0 
-        
-        # 2. Centroid and Projection
-        xy_centroid = np.mean(xy_coords, axis=0)
-        r_xy = xy_coords - xy_centroid
+        xy_centroid = cc[:, :2].mean(axis=0)
+        r_xy = cc[:, :2] - xy_centroid
         r_n  = np.linalg.norm(r_xy, axis=1, keepdims=True) + 1e-8
         r_hat = r_xy / r_n
-        
-        projection = np.sum(r_hat * grad[:, :2], axis=1)
-        
-        # 3. DYNAMIC GAUSSIAN SIGMA
-        # We use a percentage of our robust char_length. 
-        # 0.1 (10%) is a tight transition; 0.3 (30%) is a very soft bridge.
-        sigma = char_length * 0.05
-        
-        # Gaussian trench: 0 at the center, 1 at the extremities
-        gaussian_weight = 1.0 - np.exp(-(projection**2) / (2 * sigma**2))
-        
-        # 4. Final Field Assembly
-        outward_sign = np.sign(projection)
+
+        # Use gradient magnitude in XY directly, signed by whether it points outward
         grad_xy_mag = np.linalg.norm(grad[:, :2], axis=1)
-        
-        # Weighting the field
-        raw = -outward_sign * grad_xy_mag * gaussian_weight
+        outward_sign = np.sign(np.sum(r_hat * grad[:, :2], axis=1))
+        raw = -outward_sign * grad_xy_mag  # magnitude from geodesic, sign from radial
+        #dist_threshold = np.nanpercentile(dist, 5)  # bottom 15% by distance
+        #near_base_mask = dist < dist_threshold
+        #raw[near_base_mask] = 0.0
+
+        # Also zero out NaN gradient cells (interior cells)
+        #raw[np.isnan(grad[:, 0])] = 0.0
 
         return raw
 
@@ -394,57 +408,66 @@ def slice(model_path,
 
     def optimize_rotations(tet, NEIGHBOR_LOSS_WEIGHT, MAX_OVERHANG, ROTATION_MULTIPLIER, ITERATIONS, SAVE_GIF, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION):
         print('optimized_rotations')
-        curr_t = time.time()
-        initial_rotation_field = calculate_initial_rotation_field(tet, MAX_OVERHANG, ROTATION_MULTIPLIER, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION)
-        with open('check.txt', 'w') as c:
-            c.write(str(initial_rotation_field))
+        cell_face_nb = tet.field_data['cell_face_neighbours']
+        n_c = tet.number_of_cells
+        W = float(NEIGHBOR_LOSS_WEIGHT)
 
-        # OPT: ReplaceottomF iterative least_squares with a single direct sparse solve.
-        #
-        # Why this works: the original objective is Laplacian smoothing —
-        #   W * Σ_(i,j face-neighbors) (r_i − r_j)²  +  Σ_(valid i) (r_i − init_i)²
-        # This is purely quadratic, so its minimiser satisfies the linear system:
-        #   (W · L_graph  +  diag(valid_mask)) r  =  diag(valid_mask) · r_init
-        # where L_graph is the weighted graph Laplacian over face-neighbor pairs.
-        #
-        # Previously least_squares rebuilt a full COO→CSR Jacobian on each of up to
-        # ITERATIONS TRF evaluations.  spsolve does one UMFPACK LU factorisation and
-        # back-substitution — typically < 0.1 s vs 20 + s.
+        with bench.stage('smoothing'):
+            curr_t = time.time()
+            initial_rotation_field = calculate_initial_rotation_field(tet, MAX_OVERHANG, ROTATION_MULTIPLIER, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION)
 
-        from scipy.sparse.linalg import spsolve as _spsolve
+            # OPT: ReplaceottomF iterative least_squares with a single direct sparse solve.
+            #
+            # Why this works: the original objective is Laplacian smoothing —
+            #   W * Σ_(i,j face-neighbors) (r_i − r_j)²  +  Σ_(valid i) (r_i − init_i)²
+            # This is purely quadratic, so its minimiser satisfies the linear system:
+            #   (W · L_graph  +  diag(valid_mask)) r  =  diag(valid_mask) · r_init
+            # where L_graph is the weighted graph Laplacian over face-neighbor pairs.
+            #
+            # Previously least_squares rebuilt a full COO→CSR Jacobian on each of up to
+            # ITERATIONS TRF evaluations.  spsolve does one UMFPACK LU factorisation and
+            # back-substitution — typically < 0.1 s vs 20 + s.
 
-        cell_face_nb = tet.field_data["cell_face_neighbours"]
-        n_c          = tet.number_of_cells
-        valid_mask   = ~np.isnan(initial_rotation_field)
-        W            = float(NEIGHBOR_LOSS_WEIGHT)
+            from scipy.sparse.linalg import spsolve as _spsolve
 
-        ea = cell_face_nb[:, 0]          # one endpoint of each unique face-edge
-        eb = cell_face_nb[:, 1]
-        n_e = len(ea)
+            cell_face_nb = tet.field_data["cell_face_neighbours"]
+            n_c          = tet.number_of_cells
+            valid_mask   = ~np.isnan(initial_rotation_field)
+            W            = float(NEIGHBOR_LOSS_WEIGHT)
 
-        # Degree = number of face-neighbours per cell (each undirected edge counted once,
-        # so we add 1 to both endpoints)
-        degree = np.zeros(n_c, dtype=np.float64)
-        np.add.at(degree, ea, 1.0)
-        np.add.at(degree, eb, 1.0)
+            ea = cell_face_nb[:, 0]          # one endpoint of each unique face-edge
+            eb = cell_face_nb[:, 1]
+            n_e = len(ea)
 
-        # Diagonal: W * degree + anchor-weight(1 if valid else 0) + tiny eps for stability
-        diag_v = W * degree + valid_mask.astype(np.float64) + 1e-10
+            # Degree = number of face-neighbours per cell (each undirected edge counted once,
+            # so we add 1 to both endpoints)
+            degree = np.zeros(n_c, dtype=np.float64)
+            np.add.at(degree, ea, 1.0)
+            np.add.at(degree, eb, 1.0)
 
-        all_r = np.concatenate([ea, eb, np.arange(n_c, dtype=np.int32)])
-        all_c = np.concatenate([eb, ea, np.arange(n_c, dtype=np.int32)])
-        all_d = np.concatenate([-W * np.ones(n_e), -W * np.ones(n_e), diag_v])
+            # Diagonal: W * degree + anchor-weight(1 if valid else 0) + tiny eps for stability
+            diag_v = W * degree + valid_mask.astype(np.float64) + 1e-10
 
-        A_rot = sparse.coo_matrix((all_d, (all_r, all_c)),
-                                   shape=(n_c, n_c), dtype=np.float64).tocsr()
-        b_rot = np.where(valid_mask, np.nan_to_num(initial_rotation_field, nan=0.0), 0.0)
+            all_r = np.concatenate([ea, eb, np.arange(n_c, dtype=np.int32)])
+            all_c = np.concatenate([eb, ea, np.arange(n_c, dtype=np.int32)])
+            all_d = np.concatenate([-W * np.ones(n_e), -W * np.ones(n_e), diag_v])
 
-        rotation_field = _spsolve(A_rot, b_rot)
-        viz.initial_rotation_field(tet, initial_rotation_field)
-        viz.smoothed_rotation_field(tet, rotation_field)
-        viz.rotation_field_comparison(tet, initial_rotation_field, rotation_field)
+            A_rot = sparse.coo_matrix((all_d, (all_r, all_c)),
+                                    shape=(n_c, n_c), dtype=np.float64).tocsr()
+            b_rot = np.where(valid_mask, np.nan_to_num(initial_rotation_field, nan=0.0), 0.0)
 
-        print(time.time() - curr_t)
+            rotation_field = _spsolve(A_rot, b_rot)
+            viz.initial_rotation_field(tet, initial_rotation_field)
+            viz.smoothed_rotation_field(tet, rotation_field)
+            viz.rotation_field_comparison(tet, initial_rotation_field, rotation_field)
+
+            print(time.time() - curr_t)
+
+        bench.reference(
+            'smoothing', s4=lambda: s4ref.smooth_rotation_field(n_c,
+                cell_face_nb, initial_rotation_field, W, max_nfev=100, ftol=1e-6),
+            s5_result=rotation_field, correctness=bench.compare_scalar_fields
+        )
         return rotation_field
 
     NEIGHBOR_LOSS_WEIGHT = neighbor_loss_weight
@@ -519,71 +542,85 @@ def slice(model_path,
           • PyPardiso (Intel MKL PARDISO): fastest CPU direct solver.
           • CuPy cuSPARSE: GPU sparse ops, ~10–100× on large models.
         """
-        print('calculate_deformations')
-        curr_t = time.time()
+        with bench.stage('deformation'):
+            print('calculate_deformations')
+            curr_t = time.time()
 
-        from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import ThreadPoolExecutor
 
-        n_cells = tet.number_of_cells
-        n_pts   = tet.number_of_points
-        cells   = tet.field_data["cells"]           # (n_cells, 4)
+            n_cells = tet.number_of_cells
+            n_pts   = tet.number_of_points
+            cells   = tet.field_data["cells"]           # (n_cells, 4)
 
-        rotation_matrices = calculate_rotation_matrices(tet, rotation_field)
+            rotation_matrices = calculate_rotation_matrices(tet, rotation_field)
 
-        # Pre-compute per-cell rotation targets
-        # old_verts_transformed[c, j, i] = target for cell c, dim j, local vertex i
-        old_verts = tet.field_data["cell_vertices"][cells]   # (n_cells, 4, 3)
-        old_verts_transformed = np.einsum(
-            'ijk,ikl->ijl',
-            rotation_matrices,
-            (N @ old_verts).transpose(0, 2, 1)
-        )  # (n_cells, 3, 4)
+            # Pre-compute per-cell rotation targets
+            # old_verts_transformed[c, j, i] = target for cell c, dim j, local vertex i
+            old_verts = tet.field_data["cell_vertices"][cells]   # (n_cells, 4, 3)
+            old_verts_transformed = np.einsum(
+                'ijk,ikl->ijl',
+                rotation_matrices,
+                (N @ old_verts).transpose(0, 2, 1)
+            )  # (n_cells, 3, 4)
 
-        # Build sparse A once — depends only on topology + N, never changes per iter.
-        # A[c*4 + i,  cells[c, k]]  =  N[i, k]
-        # N = I4 − 0.25·ones4  →  N[i,k] = 0.75 if i==k else −0.25
-        c_idx = np.arange(n_cells)
-        _rows, _cols, _vals = [], [], []
-        for i in range(4):
-            for k in range(4):
-                _rows.append(c_idx * 4 + i)
-                _cols.append(cells[:, k])
-                _vals.append(np.full(n_cells, 0.75 if i == k else -0.25,
-                                     dtype=np.float64))
-        A_deform = sparse.coo_matrix(
-            (np.concatenate(_vals),
-             (np.concatenate(_rows), np.concatenate(_cols))),
-            shape=(n_cells * 4, n_pts), dtype=np.float64
-        ).tocsr()
+            # Build sparse A once — depends only on topology + N, never changes per iter.
+            # A[c*4 + i,  cells[c, k]]  =  N[i, k]
+            # N = I4 − 0.25·ones4  →  N[i,k] = 0.75 if i==k else −0.25
+            c_idx = np.arange(n_cells)
+            _rows, _cols, _vals = [], [], []
+            for i in range(4):
+                for k in range(4):
+                    _rows.append(c_idx * 4 + i)
+                    _cols.append(cells[:, k])
+                    _vals.append(np.full(n_cells, 0.75 if i == k else -0.25,
+                                        dtype=np.float64))
+            A_deform = sparse.coo_matrix(
+                (np.concatenate(_vals),
+                (np.concatenate(_rows), np.concatenate(_cols))),
+                shape=(n_cells * 4, n_pts), dtype=np.float64
+            ).tocsr()
 
-        # RHS: B[c*4 + i, j] = old_verts_transformed[c, j, i]
-        B_target = np.ascontiguousarray(
-            old_verts_transformed.transpose(0, 2, 1).reshape(n_cells * 4, 3)
-        )
-
-        # Parallel lsqr: 3 independent dims solved in parallel threads.
-        # Warm-start from current positions → typically converges in < 30 iters.
-        # scipy CSR matvec releases the GIL, enabling real thread parallelism.
-        x0 = tet.points   # (n_pts, 3) — current vertex positions
-
-        def _lsqr_dim(j):
-            sol = sparse.linalg.lsqr(
-                A_deform,
-                B_target[:, j],
-                x0=x0[:, j],
-                atol=1e-7, btol=1e-7,
-                iter_lim=ITERATIONS,
-                show=False
+            # RHS: B[c*4 + i, j] = old_verts_transformed[c, j, i]
+            B_target = np.ascontiguousarray(
+                old_verts_transformed.transpose(0, 2, 1).reshape(n_cells * 4, 3)
             )
-            print(f"  dim {j} ({('x','y','z')[j]}): {sol[2]} iters, "
-                  f"residual {sol[3]:.2e}")
-            return sol[0]   # (n_pts,)
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futs = [pool.submit(_lsqr_dim, j) for j in range(3)]
-            new_verts = np.stack([f.result() for f in futs], axis=1)  # (n_pts, 3)
+            # Parallel lsqr: 3 independent dims solved in parallel threads.
+            # Warm-start from current positions → typically converges in < 30 iters.
+            # scipy CSR matvec releases the GIL, enabling real thread parallelism.
+            x0 = tet.points   # (n_pts, 3) — current vertex positions
 
-        print(time.time() - curr_t)
+            def _lsqr_dim(j):
+                sol = sparse.linalg.lsqr(
+                    A_deform,
+                    B_target[:, j],
+                    x0=x0[:, j],
+                    atol=1e-7, btol=1e-7,
+                    iter_lim=ITERATIONS,
+                    show=False
+                )
+                print(f"  dim {j} ({('x','y','z')[j]}): {sol[2]} iters, "
+                    f"residual {sol[3]:.2e}")
+                return sol[0]   # (n_pts,)
+
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                futs = [pool.submit(_lsqr_dim, j) for j in range(3)]
+                new_verts = np.stack([f.result() for f in futs], axis=1)  # (n_pts, 3)
+
+            print(time.time() - curr_t)
+        bench.reference(
+            'deformation',
+            s4=lambda: s4ref.solve_deformation(
+                points         = tet.points.copy(),
+                cells          = cells,                         # already (n_cells, 4)
+                cell_centers   = tet.cell_data['cell_center'],
+                rotation_field = rotation_field,
+                max_nfev       = 1000,
+                ftol           = 1e-6,
+            ),
+            s5_result  = new_verts,
+            correctness= bench.compare_vector_fields,
+        )
         return new_verts
 
     ITERATIONS = 1000
@@ -661,24 +698,6 @@ def slice(model_path,
     subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     deformed_tet = pickle.load(open(f'{output_path}/deformed_{model_name}.pkl', 'rb'))
-
-    def tetrahedron_volume(p1, p2, p3, p4):
-        mat = np.vstack([p2 - p1, p3 - p1, p4 - p1])
-        return np.abs(np.linalg.det(mat)) / 6
-
-    # Opt: Vectorized Barycentric Mapping Coordinates via LinAlg Matrix Solver
-    def calc_barycentric_coordinates(tet_a, tet_b, tet_c, tet_d, point):
-        T = np.column_stack((tet_a - tet_d, tet_b - tet_d, tet_c - tet_d))
-        try:
-            lambdas = np.linalg.solve(T, point - tet_d)
-            return np.array([lambdas[0], lambdas[1], lambdas[2], 1.0 - np.sum(lambdas)])
-        except np.linalg.LinAlgError:
-            return np.array([0, 0, 0, 0])
-
-    def project_point_onto_plane(plane_x_axis, plane_y_axis, point):
-        projected_x = np.sum(plane_x_axis * point, axis=1)
-        projected_y = np.sum(plane_y_axis * point, axis=1)
-        return np.array([projected_x, projected_y]).T
 
     deformed_tet, _, _ = calculate_tet_attributes(deformed_tet)
     from pygcode import Line
@@ -876,40 +895,47 @@ def slice(model_path,
     # (..., m, n), NOT (..., m).  Adding a trailing K=1 column makes n=1 explicit;
     # squeeze removes it afterward.  Without this, numpy reads the batch axis as
     # the core "m" dimension and raises a shape-mismatch ValueError.
-    try:
-        _lambdas = np.linalg.solve(_T, _rhs[:, :, None]).squeeze(-1)      # (n_valid, 3)
-    except np.linalg.LinAlgError:
-        # Fallback: solve element-wise when any matrix is singular
+    with bench.stage('barycentric'):
         _lambdas = np.zeros((len(_valid_idx), 3))
-        for _k in range(len(_valid_idx)):
-            try:
-                _lambdas[_k] = np.linalg.solve(_T[_k], _rhs[_k])
-            except np.linalg.LinAlgError:
-                _lambdas[_k] = [0.0, 0.0, 0.0]
+        _det  = np.linalg.det(_T)
+        _ok   = np.abs(_det) > 1e-10
+        if _ok.all():
+        # Fast path: skip the mask, solve the whole batch in place
+            _lambdas = np.linalg.solve(_T, _rhs[:, :, None]).squeeze(-1)
+        elif _ok.any():
+            _lambdas = np.zeros((len(_valid_idx), 3))
+            _lambdas[_ok] = np.linalg.solve(_T[_ok], _rhs[_ok, :, None]).squeeze(-1)
+        else:
+            _lambdas = np.zeros((len(_valid_idx), 3))
 
-    _bary      = np.empty((len(_valid_idx), 4))
-    _bary[:, :3] = _lambdas
-    _bary[:, 3]  = 1.0 - _lambdas.sum(axis=1)
-    _bary_ok   = _bary.sum(axis=1) <= 1.01                                # mirrors `> 1.01` → None
+        _bary      = np.empty((len(_valid_idx), 4))
+        _bary[:, :3] = _lambdas
+        _bary[:, 3]  = 1.0 - _lambdas.sum(axis=1)
+        _bary_ok   = _bary.sum(axis=1) <= 1.01                                # mirrors `> 1.01` → None
 
-    # Compute pre-transformed positions and rotations
-    _vt        = vertex_transformations[_vert_indices]                     # (n_valid, 4, 3)
-    _pre_pos   = _positions_all[_valid_idx] - (_vt * _bary[:, :, None]).sum(axis=1)
-    _pre_pos[~_bary_ok] = np.nan
+        # Compute pre-transformed positions and rotations
+        _vt        = vertex_transformations[_vert_indices]                     # (n_valid, 4, 3)
+        _pre_pos   = _positions_all[_valid_idx] - (_vt * _bary[:, :, None]).sum(axis=1)
+        _pre_pos[~_bary_ok] = np.nan
 
-    _vr        = vertex_rotations[_vert_indices]                           # (n_valid, 4)
-    _pre_rot   = (_vr * _bary).sum(axis=1)
-    _pre_rot[~_bary_ok] = np.nan
+        _vr        = vertex_rotations[_vert_indices]                           # (n_valid, 4)
+        _pre_rot   = (_vr * _bary).sum(axis=1)
+        _pre_rot[~_bary_ok] = np.nan
 
-    # Map results back to all-point arrays (NaN = None in original code)
-    pre_new_positions = np.full((_n_pts, 3), np.nan)
-    pre_rotations     = np.full(_n_pts,      np.nan)
-    pre_new_positions[_valid_idx] = _pre_pos
-    pre_rotations[_valid_idx]     = _pre_rot
+        # Map results back to all-point arrays (NaN = None in original code)
+        pre_new_positions = np.full((_n_pts, 3), np.nan)
+        pre_rotations     = np.full(_n_pts,      np.nan)
+        pre_new_positions[_valid_idx] = _pre_pos
+        pre_rotations[_valid_idx]     = _pre_rot
 
-    # OPT: Pre-compute validity as a boolean array — avoids calling np.any(np.isnan(...))
-    # (which allocates a small array) on every single iteration of the reforming loop.
-    _pre_valid = ~np.any(np.isnan(pre_new_positions), axis=1)  # (n_pts,) bool
+        # OPT: Pre-compute validity as a boolean array — avoids calling np.any(np.isnan(...))
+        # (which allocates a small array) on every single iteration of the reforming loop.
+        _pre_valid = ~np.any(np.isnan(pre_new_positions), axis=1)  # (n_pts,) bool
+
+    bench.reference('barycentric',
+        s4=lambda: s4ref.compute_barycentric_point_transforms(cell_vertices=_cell_verts, query_points=_positions_all[_valid_idx]),
+        s5_result=_bary,
+        correctness=bench.compare_vector_fields)
 
     print("Reforming...")
     prev_time = time.time()
@@ -1087,6 +1113,7 @@ def slice(model_path,
             prev_theta = theta
             prev_z = z
     print(f'Total time: {time.time()-total_t}')
+    bench.finish()
 
 if __name__ == '__main__':
     import argparse

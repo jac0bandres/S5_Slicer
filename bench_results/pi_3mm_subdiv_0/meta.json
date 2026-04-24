@@ -1,0 +1,22 @@
+{
+  "run_tag": "pi_3mm_subdiv_0",
+  "stages_seen": [
+    "adjacency",
+    "barycentric",
+    "deformation",
+    "smoothing",
+    "vertex_rotation",
+    "volume_scales"
+  ],
+  "timing_rows": 16,
+  "correctness_rows": 5,
+  "config": {
+    "enabled": true,
+    "output_dir": "./bench_results",
+    "record_correctness": true,
+    "run_s4_comparison": true,
+    "run_tag": "pi_3mm_subdiv_0",
+    "track_memory": false,
+    "verbose": true
+  }
+}
