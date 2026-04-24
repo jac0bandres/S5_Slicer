@@ -8,76 +8,44 @@ import pickle
 import time
 import base64
 import os
+import argparse
 import pyvista as pv
 import subprocess
 import configparser
+import igl
+import potpourri3d as pp3d
 import json
 
 import warnings
 warnings.simplefilter('ignore')
 CURA_LOGS_DIR = os.path.abspath('./cura_logs')
 
-def update_config():
-    cfgp = configparser.ConfigParser()
+from s5_viz import viz, VizConfig
+VizConfig.enabled = True
+VizConfig.output_dir = './plots'
+VizConfig.interactive = False
 
-    cfgp.read('config/easys4.ini')
-    with open('config/core.def.json', 'r') as jfh:
-        slicer_config = json.load(jfh)
-
-    curr_layer_height = slicer_config['settings']['global']['all']['layer_height']
-    layer_height = cfgp['SLICER']['LayerHeight']
-    if curr_layer_height != layer_height:
-        slicer_config['settings']['global']['all']['layer_height'] = layer_height
-
-    with open('config/core.def.json', 'w') as jfh:
-        json.dump(slicer_config, jfh, indent=4)
-
-def get_config():
-    cfgp = configparser.ConfigParser()
-    cfgp.read('config/easys4.ini')
-    cura_path = cfgp['PATHS']['curaengine']
-    return cura_path
-
-def update_cura_config(src):
-    with open(src, 'r') as jfh:
-        slicer_config = json.load(jfh)
-
-    cfgp = configparser.ConfigParser()
-    cfgp.read('config/easys4.ini')
-
-    for setting_name, data in slicer_config['settings']['global']['all'].items():
-        if isinstance(data, dict):
-            val = data.get('value') or data.get('default_value')
-        else:
-            val = data
-        
-        cfgp['SLICER'][str(setting_name)] = str(val)
-    
-    with open('config/easys4.ini', 'w') as cfgh:
-        cfgp.write(cfgh)
-
-def update_layer_height(layer_height):
-    cfgp = configparser.ConfigParser()
-    cfgp.read('config/easys4.ini')
-
-    cfgp['SLICER']['layer_height'] = layer_height
-    
-    with open('config/easys4.ini', 'w') as cfgh:
-        cfgp.write(cfgh)
-
-def get_slicer_settings(command):
-    cfgp = configparser.ConfigParser()
-    cfgp.read('config/easys4.ini')
-    for setting_name in cfgp['SLICER']:
-        value = cfgp['SLICER'][setting_name]
-        command.extend(["-s", f'{setting_name}={value}'])
-    
-    return command
 
 total_time = time.time()
 plotter = pv.Plotter()
 
-def slice(model_path):
+def sigmoid(x, steep=1.0):
+    return 2 / (1 + np.exp(-steep*x)) - 1
+
+
+def slice(model_path, 
+          config_path, 
+          extruder_path,
+          printer_path,
+          output_path,
+          cura_path,
+          offset,
+          scale,
+          rotation_multiplier,
+          neighbor_loss_weight,
+          max_overhang,
+          nozzle_offset
+          ):
     total_t = time.time()
     prev_time = total_t
     if model_path:
@@ -88,8 +56,6 @@ def slice(model_path):
         print("No model path specified.")
         exit()
 
-    cura_path = get_config()
-
     def encode_object(obj):
         return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
 
@@ -99,16 +65,33 @@ def slice(model_path):
     up_vector = np.array([0, 0, 1])
 
     mesh = o3d.io.read_triangle_mesh(model_path)
+    
+    TARGET_TRIANGLES = 10000 
+    current_triangles = len(mesh.triangles)
+    print(current_triangles)
+    
+    if current_triangles < TARGET_TRIANGLES:
+        factor_needed = TARGET_TRIANGLES / current_triangles
+        iterations = int(np.ceil(np.log(factor_needed) / np.log(4)))
+        
+        iterations = min(iterations, 3) 
+        
+        if iterations > 0:
+            mesh = mesh.subdivide_midpoint(number_of_iterations=iterations)
+            print(f"Subdivided mesh {iterations} times. New triangle count: {len(mesh.triangles)}")
+
     input_tet = tetgen.TetGen(np.asarray(mesh.vertices), np.asarray(mesh.triangles))
     input_tet.tetrahedralize()
 
     input_tet = input_tet.grid
-    # input_tet = input_tet.scale(1)
+    input_tet = input_tet.scale(scale)
+    
 
-    PART_OFFSET = np.array([0., 0., 0.])
+    PART_OFFSET = np.array(offset)
     x_min, x_max, y_min, y_max, z_min, z_max = input_tet.bounds
     input_tet.points -= np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, z_min]) + PART_OFFSET
-    plotter.add_mesh(input_tet, show_edges=True)
+    viz.input_mesh(input_tet)
+    # plotter.add_mesh(input_tet, show_edges=True)
 
     print("Finding cell neighbors") 
     cells_only = input_tet.cells.reshape(-1, 5)[:, 1:]
@@ -138,38 +121,65 @@ def slice(model_path):
         input_tet.field_data[f'cell_{n_type}_neighbours'] = np.column_stack((
                              cols[final_mask],
                              rows[final_mask]))
-        
-    # OPT: Build padded_edge_neighbors directly from COO arrays — eliminates two O(n_edges)
-    # Python loops (the dict build + the padded array fill).  Strategy: sort all (src,dst)
-    # edge pairs by src, then compute each entry's column offset via cumsum, then scatter-fill.
-    _ec      = counts >= 2
-    _e_src   = rows[_ec]
-    _e_dst   = cols[_ec]
-    # Both directions + self-loop per cell
-    _src_f   = np.concatenate([_e_src, _e_dst, np.arange(num_cells, dtype=np.int32)])
-    _dst_f   = np.concatenate([_e_dst, _e_src, np.arange(num_cells, dtype=np.int32)])
-    _ord     = np.argsort(_src_f, kind='stable')
-    _src_s   = _src_f[_ord];  _dst_s = _dst_f[_ord]
-    _nb_cnt  = np.bincount(_src_s, minlength=num_cells)
-    _max_nb  = int(_nb_cnt.max())
-    padded_edge_neighbors = np.full((num_cells, _max_nb), -1, dtype=np.int32)
-    _iptr    = np.concatenate([[0], np.cumsum(_nb_cnt)])
-    _col_idx = np.arange(len(_dst_s), dtype=np.int32) - _iptr[_src_s]
-    padded_edge_neighbors[_src_s, _col_idx] = _dst_s
 
     print(f"Neighbors done: {round(time.time()- prev_time, 2)}s")
     prev_time = time.time()
 
-    cell_centers = input_tet.cell_centers().points
-    edges = input_tet.field_data["cell_point_neighbours"]
+    def build_surface_geodesic_field(tet, bottom_cells):
+        """Distance field via potpourri3d heat method, gradient via libigl's
+        per-face gradient operator.
 
-    starts = cell_centers[edges[:, 0]]
-    ends = cell_centers[edges[:, 1]]
-    distances = np.linalg.norm(starts - ends, axis=1)
+        Returns (cell_distance_to_bottom, cell_gradient).
+        """
 
-    # Opt: SciPy Dijkstra sparse matrix setup
-    graph_csr = sparse.coo_matrix((distances, (edges[:, 0], edges[:, 1])), shape=(num_cells, num_cells)).tocsr()
-    graph_csr = graph_csr.maximum(graph_csr.T) 
+        surface = tet.extract_surface()
+        V = np.asarray(surface.points, dtype=np.float64)
+        z_min = V[:, 2].min()
+        bottom_vertex_set = np.where(V[:, 2] < z_min + 0.3)[0]
+        F = surface.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        orig_face_cell_ids = surface.cell_data['vtkOriginalCellIds']
+
+        # Find bottom surface vertices
+        #is_bottom_cell = np.zeros(tet.number_of_cells, dtype=bool)
+        #is_bottom_cell[bottom_cells] = True
+        #bottom_faces = is_bottom_cell[orig_face_cell_ids]
+        #bottom_vertex_set = np.unique(F[bottom_faces].ravel())
+
+        # Scalar distance via heat method
+        heat_solver = pp3d.MeshHeatMethodDistanceSolver(V, F)
+        vert_dist = heat_solver.compute_distance_multisource(bottom_vertex_set.tolist())
+
+        # Per-face gradient via libigl's standard operator
+        G = igl.grad(V, F)                                # sparse (3*n_faces, n_verts)
+        face_grad_flat = G @ vert_dist                    # (3*n_faces,)
+        face_grad = face_grad_flat.reshape(3, -1).T       # (n_faces, 3)
+
+        face_dist = vert_dist[F].mean(axis=1)
+
+        # Map face quantities back to tet cells (mean over each cell's surface faces)
+        n_cells = tet.number_of_cells
+        cell_distance_to_bottom = np.full(n_cells, np.inf)
+        cell_gradient           = np.full((n_cells, 3), np.nan)
+
+        dist_sum = np.zeros(n_cells)
+        grad_sum = np.zeros((n_cells, 3))
+        cnt      = np.zeros(n_cells, dtype=int)
+        np.add.at(dist_sum, orig_face_cell_ids, face_dist)
+        np.add.at(grad_sum, orig_face_cell_ids, face_grad)
+        np.add.at(cnt,      orig_face_cell_ids, 1)
+
+        surface_mask = cnt > 0
+        cell_distance_to_bottom[surface_mask] = dist_sum[surface_mask] / cnt[surface_mask]
+        cell_gradient[surface_mask]           = grad_sum[surface_mask] / cnt[surface_mask, None]
+
+        valid_grad = cell_gradient[surface_mask]
+        mags = np.linalg.norm(valid_grad, axis=1)
+        print(f"Surface gradient magnitude: "
+            f"min={mags.min():.3f}, median={np.median(mags):.3f}, "
+            f"mean={mags.mean():.3f}, max={mags.max():.3f}")
+        viz.heat_field(tet, cell_distance_to_bottom, cell_gradient)
+
+        return cell_distance_to_bottom, cell_gradient
 
     def update_tet_attributes(tet):
         print("updating tet attributes...")
@@ -259,151 +269,115 @@ def slice(model_path):
         bottom_cells_mask = tet.cell_data['is_bottom']
         bottom_cells = np.where(bottom_cells_mask)[0]
         tet.cell_data['overhang_angle'][bottom_cells] = np.nan
+        print(f"Bottom cells: {len(bottom_cells)}")
+        bc_xy = input_tet.cell_data['face_center'][bottom_cells, :2]
+        bc_z  = input_tet.cell_data['face_center'][bottom_cells, 2]
+        print(f"Bottom cell XY extent: x=[{bc_xy[:,0].min():.1f}, {bc_xy[:,0].max():.1f}], "
+            f"y=[{bc_xy[:,1].min():.1f}, {bc_xy[:,1].max():.1f}]")
+        print(f"Bottom cell Z values: {np.unique(np.round(bc_z, 1))[:20]}")
+        print(f"Threshold was: {np.nanmin(input_tet.cell_data['face_center'][:, 2]) + 0.3:.2f}")
 
         print(time.time()-curr_t)
 
         return tet, bottom_cells_mask, bottom_cells
 
     input_tet, _, bottom_cells = calculate_tet_attributes(input_tet)
+
+    # Geodesic field on the true surface (replaces old graph + Dijkstra setup)
+    surface_distance, surface_gradient = build_surface_geodesic_field(input_tet, bottom_cells)
+    input_tet.cell_data['surface_distance'] = surface_distance
+    input_tet.cell_data['surface_gradient'] = surface_gradient
+
+    viz.surface_gradient_field(input_tet)
+    viz.radial_projection_field(input_tet)
+
     undeformed_tet = input_tet.copy()
+    viz.overhang_analysis(input_tet)
+    def calculate_path_length_to_base_gradient(tet, MAX_OVERHANG,
+                                           INITIAL_ROTATION_FIELD_SMOOTHING,
+                                           SET_INITIAL_ROTATION_TO_ZERO):
+        grad = tet.cell_data['surface_gradient']
+        cc   = tet.cell_data['cell_center']
+        
+        # 1. ROBUST SCALE: Use the standard deviation of the XY footprint
+        # This is more stable than 'bounds' for organic or rotated shapes.
+        xy_coords = cc[:, :2]
+        # Calculate the spread (standard deviation) in X and Y
+        # The '2 * sigma' of the distribution is a great proxy for "characteristic width"
+        xy_std = np.std(xy_coords, axis=0)
+        char_length = np.linalg.norm(xy_std) * 2.0 
+        
+        # 2. Centroid and Projection
+        xy_centroid = np.mean(xy_coords, axis=0)
+        r_xy = xy_coords - xy_centroid
+        r_n  = np.linalg.norm(r_xy, axis=1, keepdims=True) + 1e-8
+        r_hat = r_xy / r_n
+        
+        projection = np.sum(r_hat * grad[:, :2], axis=1)
+        
+        # 3. DYNAMIC GAUSSIAN SIGMA
+        # We use a percentage of our robust char_length. 
+        # 0.1 (10%) is a tight transition; 0.3 (30%) is a very soft bridge.
+        sigma = char_length * 0.05
+        
+        # Gaussian trench: 0 at the center, 1 at the extremities
+        gaussian_weight = 1.0 - np.exp(-(projection**2) / (2 * sigma**2))
+        
+        # 4. Final Field Assembly
+        outward_sign = np.sign(projection)
+        grad_xy_mag = np.linalg.norm(grad[:, :2], axis=1)
+        
+        # Weighting the field
+        raw = -outward_sign * grad_xy_mag * gaussian_weight
 
-    def calculate_path_length_to_base_gradient(tet, MAX_OVERHANG, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO):
-        print('calculate_path_length_to_base_gradient')
-        curr_t = time.time()
-        path_length_to_base_gradient = np.zeros((tet.number_of_cells))
-        n_cells_local = tet.number_of_cells
+        return raw
 
-        distances_to_bottom, predecessors, _ = dijkstra(
-            csgraph=graph_csr, directed=False, indices=list(bottom_cells),
-            return_predecessors=True, min_only=True
-        )
-        cell_distance_to_bottom = distances_to_bottom
+    # def calculate_path_length_to_base_gradient(tet, MAX_OVERHANG,
+    #                                             INITIAL_ROTATION_FIELD_SMOOTHING,
+    #                                             SET_INITIAL_ROTATION_TO_ZERO):
+    #     grad = tet.cell_data['surface_gradient']  # already unit vectors from build_surface_geodesic_field
+    #     cc   = tet.cell_data['cell_center']
+    #     dist = tet.cell_data['surface_distance']
+    #     
+    #     xy_centroid = cc[:, :2].mean(axis=0)
+    #     r_xy = cc[:, :2] - xy_centroid
+    #     r_n  = np.linalg.norm(r_xy, axis=1, keepdims=True) + 1e-8
+    #     r_hat = r_xy / r_n
 
-        # OPT: Boolean mask for O(1) membership tests — replaces O(n) `in bottom_cells` checks.
-        is_bottom_mask = np.zeros(n_cells_local, dtype=bool)
-        is_bottom_mask[bottom_cells] = True
+    #     # Use gradient magnitude in XY directly, signed by whether it points outward
+    #     grad_xy_mag = np.linalg.norm(grad[:, :2], axis=1)
+    #     outward_sign = np.sign(np.sum(r_hat * grad[:, :2], axis=1))
+    #     raw = -outward_sign * grad_xy_mag  # magnitude from geodesic, sign from radial
+    #     #dist_threshold = np.nanpercentile(dist, 5)  # bottom 15% by distance
+    #     #near_base_mask = dist < dist_threshold
+    #     #raw[near_base_mask] = 0.0
 
-        # OPT: Vectorized predecessor tracing — follow all cells toward their bottom ancestor
-        # simultaneously using NumPy operations instead of per-cell Python while-loops.
-        curr_nodes = np.arange(n_cells_local, dtype=np.int32)
-        for _ in range(n_cells_local):          # worst-case depth of Dijkstra tree
-            prev_nodes = predecessors[curr_nodes]
-            # Move toward root only if: predecessor exists AND current node is not already bottom
-            needs_move = (prev_nodes >= 0) & (~is_bottom_mask[curr_nodes])
-            if not needs_move.any():
-                break
-            curr_nodes[needs_move] = prev_nodes[needs_move].astype(np.int32)
+    #     # Also zero out NaN gradient cells (interior cells)
+    #     #raw[np.isnan(grad[:, 0])] = 0.0
 
-        closest_bottom_cell_indices = curr_nodes.copy()
-        # Cells that never reached a bottom node fall back to bottom_cells[0]
-        if len(bottom_cells) > 0:
-            not_at_bottom = ~is_bottom_mask[curr_nodes]
-            closest_bottom_cell_indices[not_at_bottom] = bottom_cells[0]
-
-        # OPT: Fully vectorized gradient computation using pre-built padded_edge_neighbors.
-        # Avoids O(n) Python loop with per-cell SVD.
-        finite_mask = ~np.isinf(cell_distance_to_bottom)
-        finite_cells = np.where(finite_mask)[0]
-
-        if len(finite_cells) == 0:
-            if not SET_INITIAL_ROTATION_TO_ZERO:
-                path_length_to_base_gradient[path_length_to_base_gradient == 0] = np.nan
-            tet.cell_data["path_length_to_base_gradient"] = path_length_to_base_gradient
-            print(time.time()-curr_t)
-            return path_length_to_base_gradient
-
-        cc = tet.cell_data["cell_center"]
-
-        # Get padded neighbors for finite cells and their distances
-        pn = padded_edge_neighbors[finite_cells]                          # (n_f, max_nb)
-        valid_nb = pn >= 0                                                 # (n_f, max_nb)
-        clipped_pn = np.clip(pn, 0, n_cells_local - 1)
-        dist_nb = np.where(valid_nb, cell_distance_to_bottom[clipped_pn], np.inf)  # (n_f, max_nb)
-        finite_nb = ~np.isinf(dist_nb)                                    # valid AND finite-distance
-        valid_count = finite_nb.sum(axis=1)                               # (n_f,)
-
-        # Split cells by gradient method
-        use_dir = valid_count < 3                                          # direction-to-bottom
-        use_svd = ~use_dir                                                 # SVD plane fit
-
-        # --- Branch A: direction-to-bottom (< 3 valid finite neighbors) ---
-        if use_dir.any():
-            dir_idx = finite_cells[use_dir]
-            bottom_locs  = cc[closest_bottom_cell_indices[dir_idx], :2]   # (n_d, 2)
-            cell_locs    = cc[dir_idx, :2]                                 # (n_d, 2)
-            d2b          = bottom_locs - cell_locs                         # (n_d, 2)
-            n_d2b        = np.linalg.norm(d2b, axis=1, keepdims=True)
-            d2b_norm     = np.where(n_d2b > 0, d2b / n_d2b, d2b)
-
-            c_rad        = cell_locs.copy()
-            c_rad_n      = np.linalg.norm(c_rad, axis=1, keepdims=True)
-            c_rad_norm   = np.where(c_rad_n > 0, c_rad / c_rad_n, c_rad)
-
-            dots         = np.sum(c_rad_norm * d2b_norm, axis=1)
-            opt_rot      = dots / (np.abs(dots) + 1e-8)
-            opt_rot      = np.where(np.isnan(opt_rot), 0.0, opt_rot)
-            path_length_to_base_gradient[dir_idx] = opt_rot
-
-        # --- Branch B: SVD plane fit (>= 3 valid finite neighbors) ---
-        if use_svd.any():
-            svd_pn    = pn[use_svd]                                        # (n_s, max_nb)
-            svd_valid = finite_nb[use_svd]                                 # (n_s, max_nb)
-            svd_dist  = dist_nb[use_svd]                                   # (n_s, max_nb)
-            svd_cells = finite_cells[use_svd]
-
-            # Gather local cell centers (x, y) for each neighbor slot
-            clipped_svd_pn = np.clip(svd_pn, 0, n_cells_local - 1)
-            local_cc = cc[clipped_svd_pn, :2]                             # (n_s, max_nb, 2)
-
-            # Build local point matrix [x, y, path_length] — zero-out invalid slots
-            pts = np.concatenate(
-                [local_cc, svd_dist[:, :, None]], axis=2
-            )                                                              # (n_s, max_nb, 3)
-            mask3 = svd_valid[:, :, None]
-            pts   = np.where(mask3, pts, 0.0)
-
-            # Masked mean and centred points
-            cnt   = svd_valid.sum(axis=1, keepdims=True).clip(min=1)      # (n_s, 1)
-            ctr   = pts.sum(axis=1) / cnt                                 # (n_s, 3)
-            x_c   = pts - ctr[:, None, :]                                 # (n_s, max_nb, 3)
-            x_c   = np.where(mask3, x_c, 0.0)
-
-            # Batch covariance and SVD — M = x.T @ x per cell, shape (n_s, 3, 3)
-            M     = np.einsum('nki,nkj->nij', x_c, x_c)
-            U, _, _ = np.linalg.svd(M)
-            plane_normals = U[:, :, -1]                                   # last col = min variance direction
-
-            cc_2d = cc[svd_cells, :2]
-            cc_n  = np.linalg.norm(cc_2d, axis=1, keepdims=True) + 1e-8
-            cc_norm = cc_2d / cc_n
-            grad  = np.sum(cc_norm * plane_normals[:, :2], axis=1)
-            grad  = np.where(np.isnan(grad), 0.0, grad)
-            path_length_to_base_gradient[svd_cells] = grad
-
-        if not SET_INITIAL_ROTATION_TO_ZERO:
-            path_length_to_base_gradient[path_length_to_base_gradient == 0] = np.nan
-        tet.cell_data["path_length_to_base_gradient"] = path_length_to_base_gradient
-        print(time.time()-curr_t)
-        return path_length_to_base_gradient
+    #     return raw
 
 
     def calculate_initial_rotation_field(tet, MAX_OVERHANG, ROTATION_MULTIPLIER, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION):
-        print('calculate_intial_rotation_field')
+        print('calculate_initial_rotation_field')
         curr_t = time.time()
-        initial_rotation_field = np.abs(np.deg2rad(90+MAX_OVERHANG) - tet.cell_data['overhang_angle'])
-        path_length_to_base_gradient = calculate_path_length_to_base_gradient(tet, MAX_OVERHANG, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO)
+
+        initial_rotation_field = np.abs(np.deg2rad(90 + MAX_OVERHANG) - tet.cell_data['overhang_angle'])
+
+        path_length_to_base_gradient = calculate_path_length_to_base_gradient(
+            tet, MAX_OVERHANG, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO
+        )
 
         if STEEP_OVERHANG_COMPENSATION:
             in_air_mask = tet.cell_data.get("in_air", np.zeros(tet.number_of_cells, dtype=bool))
             initial_rotation_field[in_air_mask] += 2 * (np.deg2rad(180) - tet.cell_data['overhang_angle'][in_air_mask])
 
         initial_rotation_field *= path_length_to_base_gradient
-        initial_rotation_field = np.clip(initial_rotation_field*ROTATION_MULTIPLIER, -np.deg2rad(360), np.deg2rad(360))
+        initial_rotation_field = np.clip(initial_rotation_field * ROTATION_MULTIPLIER, -np.deg2rad(360), np.deg2rad(360))
         initial_rotation_field = np.clip(initial_rotation_field, MAX_NEG_ROTATION, MAX_POS_ROTATION)
 
         tet.cell_data["initial_rotation_field"] = initial_rotation_field
         print(time.time() - curr_t)
-
         return initial_rotation_field
 
     def calculate_rotation_matrices(tet, rotation_field):
@@ -418,12 +392,14 @@ def slice(model_path):
 
         return rotation_matrices
 
-    def optimize_rotations(tet, NEIGHBOUR_LOSS_WEIGHT, MAX_OVERHANG, ROTATION_MULTIPLIER, ITERATIONS, SAVE_GIF, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION):
+    def optimize_rotations(tet, NEIGHBOR_LOSS_WEIGHT, MAX_OVERHANG, ROTATION_MULTIPLIER, ITERATIONS, SAVE_GIF, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION):
         print('optimized_rotations')
         curr_t = time.time()
         initial_rotation_field = calculate_initial_rotation_field(tet, MAX_OVERHANG, ROTATION_MULTIPLIER, STEEP_OVERHANG_COMPENSATION, INITIAL_ROTATION_FIELD_SMOOTHING, SET_INITIAL_ROTATION_TO_ZERO, MAX_POS_ROTATION, MAX_NEG_ROTATION)
+        with open('check.txt', 'w') as c:
+            c.write(str(initial_rotation_field))
 
-        # OPT: Replace TRF iterative least_squares with a single direct sparse solve.
+        # OPT: ReplaceottomF iterative least_squares with a single direct sparse solve.
         #
         # Why this works: the original objective is Laplacian smoothing —
         #   W * Σ_(i,j face-neighbors) (r_i − r_j)²  +  Σ_(valid i) (r_i − init_i)²
@@ -440,7 +416,7 @@ def slice(model_path):
         cell_face_nb = tet.field_data["cell_face_neighbours"]
         n_c          = tet.number_of_cells
         valid_mask   = ~np.isnan(initial_rotation_field)
-        W            = float(NEIGHBOUR_LOSS_WEIGHT)
+        W            = float(NEIGHBOR_LOSS_WEIGHT)
 
         ea = cell_face_nb[:, 0]          # one endpoint of each unique face-edge
         eb = cell_face_nb[:, 1]
@@ -464,12 +440,18 @@ def slice(model_path):
         b_rot = np.where(valid_mask, np.nan_to_num(initial_rotation_field, nan=0.0), 0.0)
 
         rotation_field = _spsolve(A_rot, b_rot)
+        viz.initial_rotation_field(tet, initial_rotation_field)
+        viz.smoothed_rotation_field(tet, rotation_field)
+        viz.rotation_field_comparison(tet, initial_rotation_field, rotation_field)
+
         print(time.time() - curr_t)
         return rotation_field
 
-    NEIGHBOUR_LOSS_WEIGHT = 20 
-    MAX_OVERHANG = 30          
-    ROTATION_MULTIPLIER = 2   
+    NEIGHBOR_LOSS_WEIGHT = neighbor_loss_weight
+    # MAX_OVERHANG = 30          
+    MAX_OVERHANG = max_overhang
+    # ROTATION_MULTIPLIER = 2   
+    ROTATION_MULTIPLIER = rotation_multiplier
     SET_INITIAL_ROTATION_TO_ZERO = False 
     INITIAL_ROTATION_FIELD_SMOOTHING = 30
     MAX_POS_ROTATION = np.deg2rad(360) 
@@ -480,7 +462,7 @@ def slice(model_path):
 
     rotation_field = optimize_rotations(
         undeformed_tet,
-        NEIGHBOUR_LOSS_WEIGHT,
+        NEIGHBOR_LOSS_WEIGHT,
         MAX_OVERHANG,
         ROTATION_MULTIPLIER,
         ITERATIONS,
@@ -491,6 +473,24 @@ def slice(model_path):
         MAX_POS_ROTATION,
         MAX_NEG_ROTATION
     )
+
+        # After optimize_rotations returns rotation_field
+    cc = undeformed_tet.cell_data['cell_center']
+
+    # Partition cells by body region using cc position
+    foot_mask    = cc[:, 2] < 5        # feet: bottom 5mm
+    head_mask    = cc[:, 2] > 40       # head: top portion (adjust based on mesh height)
+    arm_mask     = (cc[:, 2] > 15) & (cc[:, 2] < 30) & (np.abs(cc[:, 0]) > 15)  # arms: lateral at mid-height
+    body_mask    = (cc[:, 2] > 10) & (cc[:, 2] < 30) & (np.abs(cc[:, 0]) < 10)  # central body
+
+    for name, mask in [('feet', foot_mask), ('arms', arm_mask),
+                    ('body', body_mask), ('head', head_mask)]:
+        if mask.sum() == 0:
+            continue
+        r = rotation_field[mask]
+        print(f"{name:6s} (n={mask.sum():5d}): "
+            f"mean |r|={np.abs(r).mean():.3f} rad, "
+            f"max |r|={np.abs(r).max():.3f} rad")
 
     N = np.eye(4) - 1/4 * np.ones((4, 4)) 
 
@@ -591,6 +591,29 @@ def slice(model_path):
     new_vertices = calculate_deformation(undeformed_tet, rotation_field, ITERATIONS, SAVE_GIF)
     deformed_tet = pv.UnstructuredGrid(undeformed_tet.cells, np.full(undeformed_tet.number_of_cells, pv.CellType.TETRA), new_vertices)
 
+    # Check if displacement is dominated by rigid-body motion
+    disp = deformed_tet.points - input_tet.points
+    print(f"Mean displacement: {disp.mean(axis=0)}")                # should be ~0 if pure deformation
+    print(f"Displacement magnitude: mean={np.linalg.norm(disp, axis=1).mean():.3f}, "
+        f"max={np.linalg.norm(disp, axis=1).max():.3f}")
+
+    # Check symmetry: for each point (x, y, z), find the point closest to (-x, y, z) and compare displacements
+    pts = input_tet.points
+    mirror_pts = pts.copy()
+    mirror_pts[:, 0] *= -1   # mirror across Y-Z plane
+    from scipy.spatial import cKDTree
+    tree = cKDTree(pts)
+    _, mirror_idx = tree.query(mirror_pts)
+    # displacement at mirrored pair should have x-component sign-flipped, y and z same
+    disp_mirrored = disp[mirror_idx].copy()
+    disp_mirrored[:, 0] *= -1
+    asymmetry = np.linalg.norm(disp - disp_mirrored, axis=1)
+    print(f"Symmetry error: mean={asymmetry.mean():.3f}, max={asymmetry.max():.3f}")
+    print(f"Displacement magnitude for comparison: mean={np.linalg.norm(disp, axis=1).mean():.3f}")
+
+    viz.deformation_pair(undeformed_tet, deformed_tet)
+    viz.deformation_displacement(undeformed_tet, deformed_tet)
+
     for key in undeformed_tet.field_data.keys():
         deformed_tet.field_data[key] = undeformed_tet.field_data[key]
     for key in undeformed_tet.cell_data.keys():
@@ -601,27 +624,43 @@ def slice(model_path):
     offsets_applied = np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, z_min])
     deformed_tet.points -= offsets_applied
 
-    deformed_tet.extract_surface().save(f'output_models/{model_name}_deformed_tet.stl')
+    deformed_tet.extract_surface().save(f'{output_path}/{model_name}_deformed_tet.stl')
 
-    with open(f'pickle_files/deformed_{model_name}.pkl', 'wb') as f:
+    with open(f'{output_path}/deformed_{model_name}.pkl', 'wb') as f:
         pickle.dump(deformed_tet, f)
 
     print("Slicing with Cura...")
-    abs_custom= os.path.abspath('config/core.def.json')
-    abs_extruder = os.path.abspath('config/fdmextruder.def.json')
-    abs_printer = os.path.abspath('config/fdmprinter.def.json')
-    abs_model= os.path.abspath(f'output_models/{model_name}_deformed_tet.stl')
-    abs_output = os.path.abspath(f'input_gcode/{model_name}_deformed_tet.gcode')
+    abs_custom = os.path.abspath(config_path)
+    abs_extruder = os.path.abspath(extruder_path)
+    abs_printer = os.path.abspath(printer_path)
+    abs_model= os.path.abspath(f'{output_path}/{model_name}_deformed_tet.stl')
+    abs_output = os.path.abspath(f'{output_path}/{model_name}_deformed_tet.gcode')
+
+    # setting redundancy
+    with open(config_path, 'r') as jfh:
+        slicer_config = json.load(jfh)
+
+    args = []
+
+    # Support your existing format: settings.global.all
+    settings = slicer_config['settings']['global']['all']
+    for setting_name, data in settings.items():
+        if isinstance(data, dict):
+            val = data.get('value') if data.get('value') is not None else data.get('default_value')
+        else:
+            val = data
+        if val is not None:
+            args.extend(['-s', f'{setting_name}={val}'])
 
     command = [cura_path, 'slice', 
                '-j', abs_printer, 
-               '-j', abs_extruder, 
+               '-j', abs_extruder,
                '-j', abs_custom]
-    command = get_slicer_settings(command)
+    command.extend(args)
     command.extend(['-l', abs_model, '-o', abs_output])
     subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    deformed_tet = pickle.load(open(f'pickle_files/deformed_{model_name}.pkl', 'rb'))
+    deformed_tet = pickle.load(open(f'{output_path}/deformed_{model_name}.pkl', 'rb'))
 
     def tetrahedron_volume(p1, p2, p3, p4):
         mat = np.vstack([p2 - p1, p3 - p1, p4 - p1])
@@ -647,7 +686,7 @@ def slice(model_path):
     SEG_SIZE = 0.6 
     MAX_ROTATION = 30 
     MIN_ROTATION = -130 
-    NOZZLE_OFFSET = 42 
+    NOZZLE_OFFSET = nozzle_offset
 
     vertex_transformations = deformed_tet.points - input_tet.points
     tangential_vectors = np.cross( np.array([0, 0, 1]), input_tet.cell_data["cell_center"][:, :2])
@@ -703,6 +742,7 @@ def slice(model_path):
     vertex_rotations = np.zeros(deformed_tet.number_of_points)
     _contrib = cell_rotations[:, None] / num_cells_per_vertex[_cells_arr] # (n_cells, 4)
     np.add.at(vertex_rotations, _cells_arr, _contrib)
+    viz.vertex_rotations(deformed_tet, vertex_rotations)
 
     tet_rotation_matrices = calculate_rotation_matrices(input_tet, cell_rotations)
 
@@ -718,11 +758,12 @@ def slice(model_path):
     _vol_unwarp = _batch_tet_volume(_unwarp_v)
     _vol_warp   = _batch_tet_volume(_warp_v)
     z_squish_scales = _vol_unwarp / (_vol_warp + 1e-15)
+    viz.volume_scaling(deformed_tet, z_squish_scales)
 
     pos = np.array([0., 0., 20.])
     feed = 5000
     gcode_points = []
-    with open(f'input_gcode/{model_name}_deformed_tet.gcode', 'r') as fh:
+    with open(f'{output_path}/{model_name}_deformed_tet.gcode', 'r') as fh:
         for line_text in fh.readlines():
             line = Line(line_text)
 
@@ -793,8 +834,9 @@ def slice(model_path):
                             "feed": feed
                         })
 
-    gcode_points_containing_cells = deformed_tet.find_containing_cell([point["position"] for point in gcode_points])
-    gcode_points_closest_cells = deformed_tet.find_closest_cell([point["position"] for point in gcode_points])
+    _positions_all = np.array([p["position"] for p in gcode_points])     # (n_pts, 3)
+    gcode_points_containing_cells = deformed_tet.find_containing_cell(_positions_all)
+    gcode_points_closest_cells = deformed_tet.find_closest_cell(_positions_all)
 
     # OPT: Pre-compute (new_position, rotation) for every gcode point using batched linear solves.
     # The original called np.linalg.solve once per point inside the sequential loop (40s).
@@ -802,7 +844,6 @@ def slice(model_path):
     # then the sequential loop only handles smoothing / travelling logic using pre-computed values.
     print("Pre-computing barycentric transforms (batch)...")
     _n_pts = len(gcode_points)
-    _positions_all = np.array([p["position"] for p in gcode_points])     # (n_pts, 3)
     _commands_all  = [p["command"] for p in gcode_points]
     _containing    = np.array(gcode_points_containing_cells, dtype=np.int32)
     _closest       = np.array(gcode_points_closest_cells,   dtype=np.int32)
@@ -974,6 +1015,9 @@ def slice(model_path):
 
     print(f"Lost {len(lost_vertices)} vertices")
     print(f"Reforming done: {round(time.time()- prev_time, 2)}s")
+    viz.gcode_toolpaths(new_gcode_points,
+                        background_mesh=deformed_tet,
+                        extrusion_only=True)
     prev_time = time.time()
 
     prev_r = 0
@@ -981,7 +1025,7 @@ def slice(model_path):
     prev_z = 20
     theta_accum = 0
 
-    with open(f'output_gcode/{model_name}.gcode', 'w') as fh:
+    with open(f'{output_path}/{model_name}.gcode', 'w') as fh:
         print(f"Saving to output_gcode/{model_name}.gcode")
         fh.write("G94 ; mm/min feed  \n")
         fh.write("G28 ; home \n")
@@ -1043,3 +1087,188 @@ def slice(model_path):
             prev_theta = theta
             prev_z = z
     print(f'Total time: {time.time()-total_t}')
+
+if __name__ == '__main__':
+    import argparse
+    import json
+ 
+    parser = argparse.ArgumentParser(
+        prog='S5.py',
+        description=(
+            'Optimized Non-planar slicing'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+ 
+    # ── I/O ───────────────────────────────────────────────────────────────────
+    io = parser.add_argument_group('I/O')
+    io.add_argument(
+        'model',
+        metavar='MODEL.stl',
+        help='Input surface mesh (STL, OBJ, PLY — anything open3d accepts).',
+    )
+    io.add_argument(
+        '-o', '--output',
+        metavar='OUTPUT.gcode',
+        default='output',
+        help='Output G-code path.',
+    )
+    io.add_argument(
+        '-c', '--config',
+        metavar='CONFIG.json',
+        default='config/core.def.json',
+        help=(
+            'Custom Cura JSON settings.'
+        ),
+    )
+    io.add_argument(
+    '-u', '--cura',
+    default='C:/Program Files/UltiMaker Cura 5.11.0/CuraEngine.exe', # update to your path or pass args
+    help=(
+        'CuraEngine path .'
+    ),
+    )
+
+    io.add_argument(
+    '--extruder_path',
+    default='config/fdmextruder.def.json', # update to your path or pass args
+    help=(
+        'Default extruder definitions for CuraEngine.'
+    ),
+    )
+    
+    io.add_argument(
+    '--printer_path',
+    default='config/fdmprinter.def.json', # update to your path or pass args
+    help=(
+        'Default printer definitions for CuraEngine.'
+    ),
+    )
+ 
+    # ── Mesh placement ────────────────────────────────────────────────────────
+    mesh_grp = parser.add_argument_group('mesh placement')
+    mesh_grp.add_argument(
+        '--scale',
+        type=float,
+        default=1.0,
+        metavar='FACTOR',
+        help='Uniform scale factor applied to the mesh before slicing. Default: 1.0.',
+    )
+    mesh_grp.add_argument(
+        '--offset',
+        type=float,
+        nargs=3,
+        default=[0.0, 0.0, 0.0],
+        metavar=('X', 'Y', 'Z'),
+        help=(
+            'Additional XYZ offset (mm) applied after auto-centering. '
+            'Auto-centering places the bounding-box center at (0,0) and the '
+            'bottom face at Z=0; use --offset to fine-tune placement. '
+            'Default: 0 0 0.'
+        ),
+    )
+ 
+    # ── Rotation field ────────────────────────────────────────────────────────
+    rot_grp = parser.add_argument_group('rotation field')
+    rot_grp.add_argument(
+        '--max-overhang',
+        type=float,
+        default=30.0,
+        metavar='DEG',
+        help=(
+            'Maximum printable overhang angle from vertical (degrees). '
+            'Faces whose normal exceeds 90+MAX_OVERHANG degrees from ẑ '
+            'are treated as overhangs requiring tilt correction. Default: 30.'
+        ),
+    )
+    rot_grp.add_argument(
+        '--rotation-multiplier',
+        type=float,
+        default=2.0,
+        metavar='K',
+        help=(
+            'Scale factor applied to the raw overhang-angle magnitude before '
+            'it enters the QP as r_init. Increases tilt aggressiveness. Default: 2.'
+        ),
+    )
+    rot_grp.add_argument(
+        '--neighbor-loss-weight',
+        type=float,
+        default=30.0,
+        help=(
+            'Scale factor applied to the raw overhang-angle magnitude before '
+            'it enters the QP as r_init. Increases tilt aggressiveness. Default: 2.'
+        ),
+    )
+ 
+    # ── Machine / G-code ─────────────────────────────────────────────────────
+    mach_grp = parser.add_argument_group('machine / G-code')
+    mach_grp.add_argument(
+        '--nozzle-offset',
+        type=float,
+        default=41.5,
+        metavar='MM',
+        help=(
+            'Distance (mm) from the B-axis pivot to the nozzle tip. '
+            'Used to correct the radial and Z position when the nozzle tilts. '
+            'Default: 42.'
+        ),
+    )
+    mach_grp.add_argument(
+        '--rotation-smoothing',
+        type=float,
+        default=0.25,
+        metavar='ALPHA',
+        help=(
+            'EMA alpha for B-axis smoothing between consecutive G-code points '
+            '(0 = fully smoothed toward previous, 1 = no smoothing). Default: 0.25.'
+        ),
+    )
+ 
+    # ── Misc ──────────────────────────────────────────────────────────────────
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='Print extra diagnostic information during each pipeline stage.',
+    ) 
+
+    args = parser.parse_args() 
+ 
+    # ── Validate ──────────────────────────────────────────────────────────────
+    if not os.path.isfile(args.model):
+        parser.error(f"Model file not found: {args.model}")
+    if args.scale <= 0:
+        parser.error("--scale must be positive.")
+    if not (0.0 < args.rotation_smoothing <= 1.0):
+        parser.error("--rotation-smoothing must be in (0, 1].")
+  
+    # ── Echo configuration ────────────────────────────────────────────────────
+    if args.verbose:
+        print("── S5 args──────────────────────")
+        print(f"  model            : {args.model}")
+        print(f"  output           : {args.output}")
+        print(f"  config           : {args.config or '(none)'}")
+        print(f"  scale            : {args.scale}")
+        print(f"  offset           : {args.offset}")
+        print(f"  max_overhang     : {args.max_overhang}°")
+        print(f"  rotation_mult    : {args.rotation_multiplier}")
+        print(f"  neighbor_loss_weight: {args.neighbor_loss_weight}")
+        print(f"  nozzle_offset    : {args.nozzle_offset} mm")
+        print(f"  rot_smoothing    : {args.rotation_smoothing}")
+        print("─────────────────────────────────────────────────────────")
+ 
+    # ── Run ───────────────────────────────────────────────────────────────────
+    slice(
+        config_path         = args.config,
+        cura_path           = args.cura,
+        model_path          = args.model,
+        extruder_path       = args.extruder_path,
+        printer_path        = args.printer_path,
+        output_path         = args.output,
+        scale               = args.scale,
+        offset              = args.offset,
+        max_overhang        = args.max_overhang,
+        rotation_multiplier = args.rotation_multiplier,
+        neighbor_loss_weight= args.neighbor_loss_weight,
+        nozzle_offset       = args.nozzle_offset,
+    )

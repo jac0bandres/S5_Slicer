@@ -877,7 +877,7 @@ with tab_slice:
         st.markdown("<hr style='border-top:1px solid #1a2530'/>", unsafe_allow_html=True)
         st.markdown('<div class="panel-title" style="margin-top:0.8rem">Output Files</div>', unsafe_allow_html=True)
 
-        output_dirs = ["output_gcode", "input_gcode/deformed", "output_models/deformed"]
+        output_dirs = ["output_gcode", "input_gcode", "output_models"]
         for d in output_dirs:
             if os.path.isdir(d):
                 files = sorted(Path(d).glob("*.gcode"), key=os.path.getmtime, reverse=True)
