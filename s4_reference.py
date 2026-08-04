@@ -1,5 +1,9 @@
 """s4_reference — S4_Slicer reference implementations as plain callables.
 
+Derived from S4_Slicer by Joshua Bird (https://github.com/jyjblrd/S4_Slicer),
+licensed GPL-3.0. Extracted from its main.ipynb for benchmarking S5 against the
+original method. See the repository LICENSE (GPL-3.0) and the README credits.
+
 Each function here is a faithful extraction from main.ipynb, usable as the
 `s4` argument to bench.reference(). All functions are pure (no side effects
 on inputs, return new arrays) so you can call them alongside your S5 pipeline

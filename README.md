@@ -219,3 +219,17 @@ reference, and every model in the set slices end-to-end.
 | `plots/`, `bench_results/` | Visualization and benchmark outputs. |
 | `S5.pdf` | The method write-up. |
 | `OPTIMIZE.md` | Engineering log of correctness/perf fixes. |
+
+---
+
+## License & credits
+
+S5_Slicer is licensed under the **GNU General Public License v3.0** — see
+[`LICENSE`](LICENSE).
+
+It is a derivative of **[S4_Slicer](https://github.com/jyjblrd/S4_Slicer)** by
+**Joshua Bird**, which is licensed GPL-3.0. The underlying method and the
+reference implementation (`s4_reference.py`) are Joshua Bird's work; S5_Slicer
+extends and optimizes them. If you use this project, please also credit S4_Slicer:
+
+> Joshua Bird, *S4 Slicer*. https://github.com/jyjblrd/S4_Slicer (GPL-3.0)
