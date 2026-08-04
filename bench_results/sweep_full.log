@@ -1,0 +1,525 @@
+
+======================================================================
+[sweep 1/8] big_pi  (Big pi.stl)  s4=True
+======================================================================
+Slicing Big pi...
+[bench] adjacency            s5        16.26 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36
+[bench] adjacency            s4        43.17 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] smoothing            s5         3.74 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36
+[bench] smoothing            s4        23.88 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36  ok
+[bench] smoothing            correctness  max_abs=1.07e-05 pearson_r=1
+[bench] deformation          s5         5.35 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36
+[bench] deformation          s4        22.71 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36  ok
+[bench] deformation          correctness  max_abs=23.6 cosine_mean=0.958
+[bench] adjacency            s5        22.81 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36
+[bench] adjacency            s4        43.91 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] adjacency            s5        20.84 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36
+[bench] adjacency            s4        51.32 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] barycentric          s5       544.78 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36
+[bench] barycentric          s4     310442.76 ms  peak=   nan MB  model=Big pi;n_cells=48;n_points=36  ok
+[bench] barycentric          correctness  max_abs=2.44 cosine_mean=1
+[bench] wrote 12 timing rows, 6 correctness rows to bench_results/big_pi
+Finding cell neighbors
+Neighbors done: 0.04s
+calc tet attributes...
+updating tet attributes...
+0.015941619873046875
+Bottom cells: 4
+Bottom cell XY extent: x=[-40.1, 42.6], y=[-2.0, 2.0]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+0.30165910720825195
+Surface gradient magnitude: min=0.339, median=0.859, mean=0.843, max=1.268
+optimized_rotations
+calculate_initial_rotation_field
+0.00226593017578125
+0.003722667694091797
+arms   (n=   23): mean |r|=0.210 rad, max |r|=0.456 rad
+body   (n=    4): mean |r|=0.424 rad, max |r|=0.437 rad
+calculate_deformations
+calculate_rotation_matrices
+0.0008878707885742188
+  deformation: inverted tets=0, vol-ratio min/median/max=0.71/0.99/1.07
+0.0053250789642333984
+Mean displacement: [12.49453607 -0.06738891  5.56879362]
+Displacement magnitude: mean=14.514, max=23.633
+Symmetry error: mean=26.209, max=33.176
+Displacement magnitude for comparison: mean=14.514
+updating tet attributes...
+0.022600650787353516
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.020641803741455078
+Bottom cells: 1
+Bottom cell XY extent: x=[42.6, 42.6], y=[2.0, 2.0]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+0.3188462257385254
+calculate_rotation_matrices
+0.00039267539978027344
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 7.4s
+Saving to output_gcode/Big pi_1785797262.283319.gcode
+Total time: 354.4601716995239
+
+======================================================================
+[sweep 2/8] letter_z  (Letter_Z.stl)  s4=True
+======================================================================
+Slicing Letter_Z...
+[bench] adjacency            s5        17.67 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64
+[bench] adjacency            s4        80.74 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] smoothing            s5         3.54 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64
+[bench] smoothing            s4        35.72 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64  ok
+[bench] smoothing            correctness  max_abs=2.75e-05 pearson_r=1
+[bench] deformation          s5         6.88 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64
+[bench] deformation          s4        16.95 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64  ok
+[bench] deformation          correctness  max_abs=1.57 cosine_mean=0.985
+[bench] adjacency            s5        22.38 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64
+[bench] adjacency            s4        80.86 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] adjacency            s5        32.61 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64
+[bench] adjacency            s4        81.18 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] barycentric          s5         5.06 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64
+[bench] barycentric          s4      1405.90 ms  peak=   nan MB  model=Letter_Z;n_cells=99;n_points=64  ok
+[bench] barycentric          correctness  max_abs=21.5 cosine_mean=1
+[bench] wrote 12 timing rows, 6 correctness rows to bench_results/letter_z
+Finding cell neighbors
+Neighbors done: 0.07s
+calc tet attributes...
+updating tet attributes...
+0.017466306686401367
+Bottom cells: 15
+Bottom cell XY extent: x=[-2.5, 2.7], y=[-0.7, 1.0]
+Bottom cell Z values: [0.  0.3]
+Threshold was: 0.30
+0.3260354995727539
+Surface gradient magnitude: min=0.313, median=0.964, mean=0.928, max=1.406
+optimized_rotations
+calculate_initial_rotation_field
+0.0022585391998291016
+0.0035276412963867188
+feet   (n=   59): mean |r|=0.206 rad, max |r|=0.648 rad
+calculate_deformations
+calculate_rotation_matrices
+0.0006430149078369141
+  deformation: inverted tets=0, vol-ratio min/median/max=0.52/0.99/1.21
+0.006850481033325195
+Mean displacement: [-0.12848869 -0.00440987 -0.03859717]
+Displacement magnitude: mean=0.445, max=1.568
+Symmetry error: mean=0.637, max=1.568
+Displacement magnitude for comparison: mean=0.445
+updating tet attributes...
+0.022185564041137695
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.03233814239501953
+Bottom cells: 3
+Bottom cell XY extent: x=[2.4, 2.7], y=[-0.3, 1.0]
+Bottom cell Z values: [0.  0.3]
+Threshold was: 0.30
+0.3640298843383789
+calculate_rotation_matrices
+0.0003712177276611328
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 0.03s
+Saving to output_gcode/Letter_Z_1785797617.4571948.gcode
+Total time: 4.05415940284729
+
+======================================================================
+[sweep 3/8] pi_3mm  (pi 3mm.stl)  s4=True
+======================================================================
+Slicing pi 3mm...
+[bench] adjacency            s5        22.80 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535
+[bench] adjacency            s4      1158.21 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] smoothing            s5        11.10 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535
+[bench] smoothing            s4        66.93 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535  ok
+[bench] smoothing            correctness  max_abs=0.000111 pearson_r=1
+[bench] deformation          s5        16.34 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535
+[bench] deformation          s4        77.05 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535  ok
+[bench] deformation          correctness  max_abs=8.81 cosine_mean=0.994
+[bench] adjacency            s5        25.17 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535
+[bench] adjacency            s4      1136.56 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] adjacency            s5        27.59 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535
+[bench] adjacency            s4      1377.59 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] barycentric          s5       167.45 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535
+[bench] barycentric          s4     92642.43 ms  peak=   nan MB  model=pi 3mm;n_cells=1691;n_points=535  ok
+[bench] barycentric          correctness  max_abs=0.0544 cosine_mean=1
+[bench] wrote 12 timing rows, 6 correctness rows to bench_results/pi_3mm
+Finding cell neighbors
+Neighbors done: 0.08s
+calc tet attributes...
+updating tet attributes...
+0.022606611251831055
+Bottom cells: 64
+Bottom cell XY extent: x=[-14.2, 14.2], y=[-4.2, 4.2]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+1.4249353408813477
+Surface gradient magnitude: min=0.167, median=0.980, mean=0.956, max=1.369
+optimized_rotations
+calculate_initial_rotation_field
+0.0029363632202148438
+0.011075496673583984
+feet   (n=  279): mean |r|=0.100 rad, max |r|=0.272 rad
+arms   (n=  225): mean |r|=0.701 rad, max |r|=0.921 rad
+body   (n=  448): mean |r|=0.463 rad, max |r|=0.792 rad
+calculate_deformations
+calculate_rotation_matrices
+0.0017430782318115234
+  deformation: inverted tets=0, vol-ratio min/median/max=0.21/0.98/2.00
+0.016299962997436523
+Mean displacement: [ 0.09543119 -0.28097355  0.75246773]
+Displacement magnitude: mean=2.240, max=8.811
+Symmetry error: mean=0.561, max=2.278
+Displacement magnitude for comparison: mean=2.240
+updating tet attributes...
+0.024976015090942383
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.02738356590270996
+Bottom cells: 35
+Bottom cell XY extent: x=[-10.8, 11.7], y=[-4.2, 4.2]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+1.6630327701568604
+calculate_rotation_matrices
+0.0005273818969726562
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 3.17s
+Saving to output_gcode/pi 3mm_1785797621.51467.gcode
+Total time: 117.58354687690735
+
+======================================================================
+[sweep 4/8] dino  (dino.stl)  s4=True
+======================================================================
+Slicing dino...
+[bench] adjacency            s5        36.17 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323
+[bench] adjacency            s4      8859.22 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] smoothing            s5        57.41 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323
+[bench] smoothing            s4      3292.71 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323  ok
+[bench] smoothing            correctness  max_abs=0.000253 pearson_r=1
+[bench] deformation          s5        49.99 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323
+[bench] deformation          s4       966.10 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323  ok
+[bench] deformation          correctness  max_abs=25.8 cosine_mean=0.942
+[bench] adjacency            s5        40.21 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323
+[bench] adjacency            s4      7541.65 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] adjacency            s5        37.33 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323
+[bench] adjacency            s4     11188.05 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323  ok
+[bench] adjacency            correctness  exact_match=True
+[bench] barycentric          s5       722.36 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323
+[bench] barycentric          s4     469515.65 ms  peak=   nan MB  model=dino;n_cells=9038;n_points=2323  ok
+[bench] barycentric          correctness  max_abs=0.062 cosine_mean=1
+[bench] wrote 12 timing rows, 6 correctness rows to bench_results/dino
+Finding cell neighbors
+Neighbors done: 0.19s
+calc tet attributes...
+updating tet attributes...
+0.035982608795166016
+Bottom cells: 1155
+Bottom cell XY extent: x=[-18.9, 17.7], y=[-25.6, 34.1]
+Bottom cell Z values: [0.  0.1 0.2 0.3]
+Threshold was: 0.30
+9.181759357452393
+Surface gradient magnitude: min=0.101, median=1.001, mean=0.996, max=2.039
+optimized_rotations
+calculate_initial_rotation_field
+0.004215240478515625
+0.05738520622253418
+feet   (n= 5581): mean |r|=0.536 rad, max |r|=1.510 rad
+arms   (n=   29): mean |r|=0.097 rad, max |r|=0.207 rad
+body   (n=  588): mean |r|=0.488 rad, max |r|=0.816 rad
+head   (n=  844): mean |r|=0.256 rad, max |r|=0.477 rad
+calculate_deformations
+calculate_rotation_matrices
+0.0017533302307128906
+  deformation: inverted tets=12, vol-ratio min/median/max=-1.91/0.94/2.78
+0.04996633529663086
+Mean displacement: [-1.95550441 -4.45886651 -0.89626552]
+Displacement magnitude: mean=6.992, max=25.841
+Symmetry error: mean=4.668, max=6.319
+Displacement magnitude for comparison: mean=6.992
+updating tet attributes...
+0.04002118110656738
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.037140607833862305
+Bottom cells: 7
+Bottom cell XY extent: x=[-2.9, -1.6], y=[33.8, 34.2]
+Bottom cell Z values: [0.  0.2 0.3 0.4 0.8]
+Threshold was: 0.30
+11.533115863800049
+calculate_rotation_matrices
+0.0035247802734375
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 11.72s
+Saving to output_gcode/dino_1785797739.2439106.gcode
+Total time: 577.6616821289062
+
+======================================================================
+[sweep 5/8] bridge  (bridge.stl)  s4=False
+======================================================================
+Slicing bridge...
+[bench] adjacency            s5        60.76 ms  peak=   nan MB  model=bridge;n_cells=23583;n_points=5641
+[bench] smoothing            s5       321.29 ms  peak=   nan MB  model=bridge;n_cells=23583;n_points=5641
+[bench] deformation          s5       153.06 ms  peak=   nan MB  model=bridge;n_cells=23583;n_points=5641
+[bench] adjacency            s5        82.58 ms  peak=   nan MB  model=bridge;n_cells=23583;n_points=5641
+[bench] adjacency            s5        62.57 ms  peak=   nan MB  model=bridge;n_cells=23583;n_points=5641
+[bench] barycentric          s5       161.38 ms  peak=   nan MB  model=bridge;n_cells=23583;n_points=5641
+[bench] wrote 6 timing rows, 0 correctness rows to bench_results/bridge
+Finding cell neighbors
+Neighbors done: 0.58s
+calc tet attributes...
+updating tet attributes...
+0.06046581268310547
+Bottom cells: 408
+Bottom cell XY extent: x=[-39.7, 39.7], y=[-4.7, 4.7]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+0.2716081142425537
+Surface gradient magnitude: min=0.089, median=0.994, mean=0.977, max=2.009
+optimized_rotations
+calculate_initial_rotation_field
+0.0059130191802978516
+0.3212766647338867
+feet   (n= 4048): mean |r|=0.166 rad, max |r|=0.470 rad
+body   (n= 4078): mean |r|=2.376 rad, max |r|=2.754 rad
+calculate_deformations
+calculate_rotation_matrices
+0.004128694534301758
+  deformation: inverted tets=556, vol-ratio min/median/max=-6.79/0.82/2.01
+0.15303945541381836
+Mean displacement: [-50.59627298  -0.29042559   6.48166707]
+Displacement magnitude: mean=52.111, max=101.248
+Symmetry error: mean=100.557, max=102.171
+Displacement magnitude for comparison: mean=52.111
+updating tet attributes...
+0.08243322372436523
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.062389373779296875
+Bottom cells: 94
+Bottom cell XY extent: x=[35.3, 39.7], y=[-4.7, 4.7]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+0.28102707862854004
+calculate_rotation_matrices
+0.003246784210205078
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 2.76s
+Saving to output_gcode/bridge_1785798317.4124284.gcode
+Total time: 24.580840587615967
+
+======================================================================
+[sweep 6/8] squirtle  (Squirtle.stl)  s4=False
+======================================================================
+Slicing Squirtle...
+[bench] adjacency            s5       603.52 ms  peak=   nan MB  model=Squirtle;n_cells=292773;n_points=59681
+[bench] smoothing            s5     15633.58 ms  peak=   nan MB  model=Squirtle;n_cells=292773;n_points=59681
+[bench] deformation          s5      3406.75 ms  peak=   nan MB  model=Squirtle;n_cells=292773;n_points=59681
+[bench] adjacency            s5       635.82 ms  peak=   nan MB  model=Squirtle;n_cells=292773;n_points=59681
+[bench] adjacency            s5       639.60 ms  peak=   nan MB  model=Squirtle;n_cells=292773;n_points=59681
+[bench] barycentric          s5       475.94 ms  peak=   nan MB  model=Squirtle;n_cells=292773;n_points=59681
+[bench] wrote 6 timing rows, 0 correctness rows to bench_results/squirtle
+Finding cell neighbors
+Neighbors done: 8.51s
+calc tet attributes...
+updating tet attributes...
+0.6033155918121338
+Bottom cells: 3706
+Bottom cell XY extent: x=[-17.9, 23.0], y=[-14.7, 19.7]
+Bottom cell Z values: [0.  0.1 0.2 0.3]
+Threshold was: 0.30
+1.5709559917449951
+Surface gradient magnitude: min=0.060, median=1.010, mean=1.002, max=28.653
+optimized_rotations
+calculate_initial_rotation_field
+0.043576955795288086
+15.633556842803955
+feet   (n=24684): mean |r|=0.260 rad, max |r|=1.031 rad
+arms   (n= 5388): mean |r|=0.787 rad, max |r|=1.638 rad
+body   (n=64842): mean |r|=0.339 rad, max |r|=2.084 rad
+head   (n=11601): mean |r|=0.697 rad, max |r|=1.841 rad
+calculate_deformations
+calculate_rotation_matrices
+0.04291939735412598
+  deformation: inverted tets=6631, vol-ratio min/median/max=-1230.37/0.79/1276.47
+3.406735897064209
+Mean displacement: [ 2.3176389  -0.71634298 -1.05930641]
+Displacement magnitude: mean=3.792, max=12.153
+Symmetry error: mean=4.719, max=13.100
+Displacement magnitude for comparison: mean=3.792
+updating tet attributes...
+0.6356527805328369
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.6394057273864746
+Bottom cells: 10
+Bottom cell XY extent: x=[-17.8, 14.6], y=[-13.7, 2.5]
+Bottom cell Z values: [0.  0.1 0.2 0.3 0.4]
+Threshold was: 0.30
+1.5747344493865967
+calculate_rotation_matrices
+0.04824328422546387
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 6.91s
+Saving to output_gcode/Squirtle_1785798342.1098554.gcode
+Total time: 95.14464044570923
+
+======================================================================
+[sweep 7/8] benchy  (benchy upsidedown tilted.stl)  s4=False
+======================================================================
+Slicing benchy upsidedown tilted...
+[bench] adjacency            s5       164.39 ms  peak=   nan MB  model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+[bench] smoothing            s5      1295.13 ms  peak=   nan MB  model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+[bench] deformation          s5       577.54 ms  peak=   nan MB  model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+[bench] adjacency            s5       187.14 ms  peak=   nan MB  model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+[bench] adjacency            s5       210.80 ms  peak=   nan MB  model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+[bench] barycentric          s5       409.75 ms  peak=   nan MB  model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+[bench] wrote 6 timing rows, 0 correctness rows to bench_results/benchy
+Finding cell neighbors
+Neighbors done: 1.45s
+calc tet attributes...
+updating tet attributes...
+0.1642141342163086
+Bottom cells: 5576
+Bottom cell XY extent: x=[-14.0, 11.0], y=[-13.8, 11.2]
+Bottom cell Z values: [0.  0.1 0.2 0.3]
+Threshold was: 0.30
+0.5634920597076416
+Surface gradient magnitude: min=0.060, median=0.986, mean=0.971, max=1.811
+optimized_rotations
+calculate_initial_rotation_field
+0.01452016830444336
+1.2951149940490723
+feet   (n=31067): mean |r|=1.422 rad, max |r|=3.013 rad
+arms   (n= 1414): mean |r|=0.593 rad, max |r|=1.025 rad
+body   (n= 6501): mean |r|=0.666 rad, max |r|=1.988 rad
+head   (n=13280): mean |r|=0.683 rad, max |r|=1.483 rad
+calculate_deformations
+calculate_rotation_matrices
+0.011170625686645508
+  deformation: inverted tets=513, vol-ratio min/median/max=-14.57/0.86/22.77
+0.5775148868560791
+Mean displacement: [ 4.97890668 -2.36509103  4.97225944]
+Displacement magnitude: mean=8.979, max=19.394
+Symmetry error: mean=9.625, max=17.923
+Displacement magnitude for comparison: mean=8.979
+updating tet attributes...
+0.1869516372680664
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.21059393882751465
+Bottom cells: 83
+Bottom cell XY extent: x=[-13.7, -9.7], y=[-10.5, -3.4]
+Bottom cell Z values: [0.  0.1 0.2 0.3 0.4 0.5]
+Threshold was: 0.30
+0.6596615314483643
+calculate_rotation_matrices
+0.0108184814453125
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 6.6s
+Saving to output_gcode/benchy upsidedown tilted_1785798437.687073.gcode
+Total time: 62.04870009422302
+
+======================================================================
+[sweep 8/8] tree  (tree.stl)  s4=False
+======================================================================
+Slicing tree...
+  [tetgen as-is] failed: The input surface mesh contain self-intersections.
+[bench] adjacency            s5       397.02 ms  peak=   nan MB  model=tree;n_cells=182281;n_points=43824
+[bench] smoothing            s5      1526.44 ms  peak=   nan MB  model=tree;n_cells=182281;n_points=43824
+[bench] deformation          s5      1113.91 ms  peak=   nan MB  model=tree;n_cells=182281;n_points=43824
+[bench] adjacency            s5       429.73 ms  peak=   nan MB  model=tree;n_cells=182281;n_points=43824
+[bench] adjacency            s5       450.54 ms  peak=   nan MB  model=tree;n_cells=182281;n_points=43824
+[bench] barycentric          s5      1058.44 ms  peak=   nan MB  model=tree;n_cells=182281;n_points=43824
+[bench] wrote 6 timing rows, 0 correctness rows to bench_results/tree
+  tetrahedralization succeeded with tier: tetgen repaired
+Finding cell neighbors
+Neighbors done: 4.95s
+calc tet attributes...
+updating tet attributes...
+0.3967595100402832
+Bottom cells: 2175
+Bottom cell XY extent: x=[-25.0, 25.2], y=[-25.2, 19.4]
+Bottom cell Z values: [0.]
+Threshold was: 0.30
+1.2562367916107178
+Surface gradient magnitude: min=0.019, median=1.008, mean=1.010, max=16.890
+optimized_rotations
+calculate_initial_rotation_field
+0.03307843208312988
+1.5264179706573486
+feet   (n= 7280): mean |r|=1.674 rad, max |r|=2.587 rad
+body   (n= 2204): mean |r|=0.114 rad, max |r|=0.486 rad
+head   (n=170508): mean |r|=0.889 rad, max |r|=2.852 rad
+calculate_deformations
+calculate_rotation_matrices
+0.03126239776611328
+  deformation: inverted tets=620, vol-ratio min/median/max=-77.12/0.98/254.80
+1.1138873100280762
+Mean displacement: [-8.93080477  9.48481518 15.15331997]
+Displacement magnitude: mean=26.459, max=78.698
+Symmetry error: mean=12.190, max=53.597
+Displacement magnitude for comparison: mean=26.459
+updating tet attributes...
+0.4295527935028076
+Slicing with Cura...
+calc tet attributes...
+updating tet attributes...
+0.4503366947174072
+Bottom cells: 4
+Bottom cell XY extent: x=[-13.3, -12.4], y=[-25.4, -24.8]
+Bottom cell Z values: [0.  0.7]
+Threshold was: 0.30
+1.3221709728240967
+calculate_rotation_matrices
+0.025853872299194336
+Pre-computing barycentric transforms (batch)...
+Reforming...
+Lost 0 vertices
+Reforming done: 19.23s
+Saving to output_gcode/tree_1785798500.109401.gcode
+Total time: 163.47320079803467
+
+======================================================================
+SWEEP SUMMARY  (23.4 min total)
+======================================================================
+  OK   big_pi       355.2s  s4=True  
+  OK   letter_z       4.1s  s4=True  
+  OK   pi_3mm       117.7s  s4=True  
+  OK   dino         578.2s  s4=True  
+  OK   bridge        24.7s  s4=False  
+  OK   squirtle      95.6s  s4=False  
+  OK   benchy        62.4s  s4=False  
+  OK   tree         164.6s  s4=False  

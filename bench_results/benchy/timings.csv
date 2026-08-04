@@ -1,0 +1,7 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.164391,nan,,ok,,model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+smoothing,s5,1.295134,nan,,ok,,model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+deformation,s5,0.577535,nan,,ok,,model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+adjacency,s5,0.187142,nan,,ok,,model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+adjacency,s5,0.210801,nan,,ok,,model=benchy upsidedown tilted;n_cells=76543;n_points=18838
+barycentric,s5,0.409752,nan,,ok,,model=benchy upsidedown tilted;n_cells=76543;n_points=18838

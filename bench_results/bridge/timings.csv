@@ -1,0 +1,7 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.060758,nan,,ok,,model=bridge;n_cells=23583;n_points=5641
+smoothing,s5,0.321294,nan,,ok,,model=bridge;n_cells=23583;n_points=5641
+deformation,s5,0.153058,nan,,ok,,model=bridge;n_cells=23583;n_points=5641
+adjacency,s5,0.082585,nan,,ok,,model=bridge;n_cells=23583;n_points=5641
+adjacency,s5,0.062566,nan,,ok,,model=bridge;n_cells=23583;n_points=5641
+barycentric,s5,0.161378,nan,,ok,,model=bridge;n_cells=23583;n_points=5641

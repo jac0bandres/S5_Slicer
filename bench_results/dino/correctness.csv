@@ -1,0 +1,7 @@
+stage,metric,max_abs,rms,cosine_mean,pearson_r,exact_match,n_compared,only_in_s4,only_in_s5,nan_disagree,n_s4,n_s5,context
+adjacency,edge_set_compare,,,,,True,,0,0,,16534,16534,model=dino;n_cells=9038;n_points=2323
+smoothing,scalar_compare,0.00025296699323695826,0.00013242470570143096,,0.9999999894273366,,9038,,,0,,,model=dino;n_cells=9038;n_points=2323
+deformation,vector_compare,25.841319233160004,9.494606131244776,0.9422428361644256,,,2323,,,,,,model=dino;n_cells=9038;n_points=2323
+adjacency,edge_set_compare,,,,,True,,0,0,,16534,16534,model=dino;n_cells=9038;n_points=2323
+adjacency,edge_set_compare,,,,,True,,0,0,,16534,16534,model=dino;n_cells=9038;n_points=2323
+barycentric,vector_compare,0.06199871702226195,0.000278936420722792,0.9999999153011514,,,613312,,,,,,model=dino;n_cells=9038;n_points=2323

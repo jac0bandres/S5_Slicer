@@ -1,0 +1,13 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.016260,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+adjacency,s4,0.043166,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+smoothing,s5,0.003739,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+smoothing,s4,0.023882,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+deformation,s5,0.005350,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+deformation,s4,0.022710,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+adjacency,s5,0.022807,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+adjacency,s4,0.043908,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+adjacency,s5,0.020843,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+adjacency,s4,0.051319,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+barycentric,s5,0.544779,nan,,ok,,model=Big pi;n_cells=48;n_points=36
+barycentric,s4,310.442757,nan,,ok,,model=Big pi;n_cells=48;n_points=36

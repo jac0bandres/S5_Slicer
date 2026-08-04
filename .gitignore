@@ -1,3 +1,15 @@
 .venv
 slicer/__pycache__
 pickle_files
+_skipped.face
+_skipped.node
+
+# generated slice / benchmark artifacts (regenerable)
+__pycache__/
+output/
+test_output/
+test_output.gcode/
+bench_output/
+cura_logs/
+*.pkl
+__tracked_surface.stl

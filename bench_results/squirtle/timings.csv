@@ -1,0 +1,7 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.603516,nan,,ok,,model=Squirtle;n_cells=292773;n_points=59681
+smoothing,s5,15.633576,nan,,ok,,model=Squirtle;n_cells=292773;n_points=59681
+deformation,s5,3.406754,nan,,ok,,model=Squirtle;n_cells=292773;n_points=59681
+adjacency,s5,0.635818,nan,,ok,,model=Squirtle;n_cells=292773;n_points=59681
+adjacency,s5,0.639603,nan,,ok,,model=Squirtle;n_cells=292773;n_points=59681
+barycentric,s5,0.475944,nan,,ok,,model=Squirtle;n_cells=292773;n_points=59681

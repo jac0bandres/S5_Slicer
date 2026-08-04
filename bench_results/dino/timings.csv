@@ -1,0 +1,13 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.036169,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+adjacency,s4,8.859220,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+smoothing,s5,0.057407,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+smoothing,s4,3.292713,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+deformation,s5,0.049989,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+deformation,s4,0.966102,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+adjacency,s5,0.040209,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+adjacency,s4,7.541648,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+adjacency,s5,0.037329,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+adjacency,s4,11.188050,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+barycentric,s5,0.722362,nan,,ok,,model=dino;n_cells=9038;n_points=2323
+barycentric,s4,469.515653,nan,,ok,,model=dino;n_cells=9038;n_points=2323

@@ -1,0 +1,20 @@
+{
+  "run_tag": "tree",
+  "stages_seen": [
+    "adjacency",
+    "barycentric",
+    "deformation",
+    "smoothing"
+  ],
+  "timing_rows": 6,
+  "correctness_rows": 0,
+  "config": {
+    "enabled": true,
+    "output_dir": "./bench_results",
+    "record_correctness": true,
+    "run_s4_comparison": false,
+    "run_tag": "tree",
+    "track_memory": false,
+    "verbose": true
+  }
+}

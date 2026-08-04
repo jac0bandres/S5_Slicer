@@ -1,0 +1,20 @@
+{
+  "run_tag": "dino",
+  "stages_seen": [
+    "adjacency",
+    "barycentric",
+    "deformation",
+    "smoothing"
+  ],
+  "timing_rows": 12,
+  "correctness_rows": 6,
+  "config": {
+    "enabled": true,
+    "output_dir": "./bench_results",
+    "record_correctness": true,
+    "run_s4_comparison": true,
+    "run_tag": "dino",
+    "track_memory": false,
+    "verbose": true
+  }
+}

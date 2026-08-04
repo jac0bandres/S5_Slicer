@@ -1,0 +1,7 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.397020,nan,,ok,,model=tree;n_cells=182281;n_points=43824
+smoothing,s5,1.526438,nan,,ok,,model=tree;n_cells=182281;n_points=43824
+deformation,s5,1.113911,nan,,ok,,model=tree;n_cells=182281;n_points=43824
+adjacency,s5,0.429728,nan,,ok,,model=tree;n_cells=182281;n_points=43824
+adjacency,s5,0.450542,nan,,ok,,model=tree;n_cells=182281;n_points=43824
+barycentric,s5,1.058443,nan,,ok,,model=tree;n_cells=182281;n_points=43824

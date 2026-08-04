@@ -48,7 +48,7 @@ from scipy.spatial.transform import Rotation as R
 # §4.1  Adjacency
 # =============================================================================
 
-def compute_adjacency(tet, already_run) -> dict:
+def compute_adjacency(tet) -> dict:
     """Per-cell-type neighbor lists. Mirrors main.ipynb cell 2.
 
     Returns {'point': (m,2), 'edge': (m,2), 'face': (m,2)} with (lo,hi) order

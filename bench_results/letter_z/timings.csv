@@ -1,0 +1,13 @@
+stage,impl,wall_s,peak_mb,iterations,status,error_msg,context
+adjacency,s5,0.017673,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+adjacency,s4,0.080743,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+smoothing,s5,0.003542,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+smoothing,s4,0.035715,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+deformation,s5,0.006880,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+deformation,s4,0.016951,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+adjacency,s5,0.022378,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+adjacency,s4,0.080855,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+adjacency,s5,0.032607,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+adjacency,s4,0.081175,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+barycentric,s5,0.005055,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64
+barycentric,s4,1.405896,nan,,ok,,model=Letter_Z;n_cells=99;n_points=64

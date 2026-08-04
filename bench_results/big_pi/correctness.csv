@@ -1,0 +1,7 @@
+stage,metric,max_abs,rms,cosine_mean,pearson_r,exact_match,n_compared,only_in_s4,only_in_s5,nan_disagree,n_s4,n_s5,context
+adjacency,edge_set_compare,,,,,True,,0,0,,62,62,model=Big pi;n_cells=48;n_points=36
+smoothing,scalar_compare,1.0667882873571788e-05,3.854366808845994e-06,,0.9999999999421927,,48,,,0,,,model=Big pi;n_cells=48;n_points=36
+deformation,vector_compare,23.61507361565618,15.955146789395215,0.9581762556771457,,,36,,,,,,model=Big pi;n_cells=48;n_points=36
+adjacency,edge_set_compare,,,,,True,,0,0,,62,62,model=Big pi;n_cells=48;n_points=36
+adjacency,edge_set_compare,,,,,True,,0,0,,62,62,model=Big pi;n_cells=48;n_points=36
+barycentric,vector_compare,2.4391675966876787,0.0034171793766391615,0.9999986731836932,,,510769,,,,,,model=Big pi;n_cells=48;n_points=36
