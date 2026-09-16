@@ -1,0 +1,145 @@
+{
+  "status": "deformation/scalar stages; fixed-count layers do not certify thickness or printability",
+  "implementation": "paper",
+  "input_up_axis": "z",
+  "output_up_axis": "z",
+  "source_commit": "a77ef04115b1383a58f228a7f67ce4434c9d09f3",
+  "source_path": "/home/jacob/S5_Slicer/s3/tests/fixtures/cantilever.tet",
+  "sha256": "af0a2538a643f01d347a54ad3094d173d90b5f73dd3aea7755708c06b9c6785d",
+  "config": {
+    "alpha": 30.0,
+    "beta": 10.0,
+    "gamma": 10.0,
+    "weight_sf": 1.0,
+    "weight_sr": 0.0,
+    "weight_sq": 0.0,
+    "rigidity": 1.0,
+    "scale_compatibility": 6.0,
+    "inner_iterations": 7,
+    "max_outer_iterations": 20,
+    "relative_tolerance": 0.05,
+    "objective_tolerance": 1e-08,
+    "final_conformal_weight": 10.0,
+    "concavity_control": true,
+    "nozzle_cone_angle": 60.0,
+    "concavity_exponent": 1.0,
+    "exclude_build_plate": true
+  },
+  "history": [
+    {
+      "outer": 1,
+      "pi": 1.588138110996011,
+      "worst_angle_degrees": 12.787586483177238,
+      "relative_change": 0.6208599539835395,
+      "inverted_cells": 0,
+      "min_determinant": 0.9742008148939039,
+      "max_determinant": 1.0281187569133887,
+      "local_collision_pairs": 0,
+      "seconds": 0.12434103600003255
+    },
+    {
+      "outer": 2,
+      "pi": 0.7203710479998664,
+      "worst_angle_degrees": 5.076480842541315,
+      "relative_change": 0.5464052886760075,
+      "inverted_cells": 0,
+      "min_determinant": 0.9116678025607515,
+      "max_determinant": 1.0083279352634942,
+      "local_collision_pairs": 23,
+      "seconds": 0.12689440299999433
+    },
+    {
+      "outer": 3,
+      "pi": 0.6909779146036453,
+      "worst_angle_degrees": 5.0388708724267275,
+      "relative_change": 0.04080276890337564,
+      "inverted_cells": 0,
+      "min_determinant": 0.9059616434975637,
+      "max_determinant": 1.0041530147911912,
+      "local_collision_pairs": 17,
+      "seconds": 0.1356660159999592
+    }
+  ],
+  "layers": [
+    {
+      "file": "0000.obj",
+      "level": 1.226612539472056,
+      "vertices": 8,
+      "faces": 4
+    },
+    {
+      "file": "0001.obj",
+      "level": 3.6798376184161676,
+      "vertices": 8,
+      "faces": 4
+    },
+    {
+      "file": "0002.obj",
+      "level": 6.13306269736028,
+      "vertices": 17,
+      "faces": 14
+    },
+    {
+      "file": "0003.obj",
+      "level": 8.586287776304392,
+      "vertices": 21,
+      "faces": 20
+    },
+    {
+      "file": "0004.obj",
+      "level": 11.039512855248503,
+      "vertices": 20,
+      "faces": 18
+    },
+    {
+      "file": "0005.obj",
+      "level": 13.492737934192617,
+      "vertices": 20,
+      "faces": 22
+    },
+    {
+      "file": "0006.obj",
+      "level": 15.945963013136728,
+      "vertices": 20,
+      "faces": 22
+    },
+    {
+      "file": "0007.obj",
+      "level": 18.39918809208084,
+      "vertices": 12,
+      "faces": 12
+    },
+    {
+      "file": "0008.obj",
+      "level": 20.852413171024953,
+      "vertices": 12,
+      "faces": 12
+    },
+    {
+      "file": "0009.obj",
+      "level": 23.305638249969064,
+      "vertices": 12,
+      "faces": 12
+    },
+    {
+      "file": "0010.obj",
+      "level": 25.758863328913176,
+      "vertices": 4,
+      "faces": 2
+    },
+    {
+      "file": "0011.obj",
+      "level": 28.21208840785729,
+      "vertices": 4,
+      "faces": 2
+    }
+  ],
+  "stop_reason": "relative_stagnation",
+  "initial_pi": 4.188790204786391,
+  "seconds": 0.4186479850000069,
+  "versions": {
+    "python": "3.13.5 (main, Jun 25 2025, 18:55:22) [GCC 14.2.0]",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1"
+  }
+}

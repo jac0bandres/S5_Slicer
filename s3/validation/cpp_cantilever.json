@@ -1,0 +1,11 @@
+{
+  "reference_commit": "a77ef04115b1383a58f228a7f67ce4434c9d09f3",
+  "fixture": "tests/fixtures/cantilever.tet, rotated to Y-up",
+  "scope": "Active upstream support-free routine; modified sparse backend and translation gauge, no GUI",
+  "max_absolute_errors": {
+    "heat": 3.3306690738754696e-15,
+    "growing": 3.7025504190379976e-17,
+    "scales": 4.1183689791779443e-10,
+    "deformed": 5.546313630588884e-09
+  }
+}

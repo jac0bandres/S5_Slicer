@@ -1,0 +1,112 @@
+{
+  "status": "deformation/scalar stages; fixed-count layers do not certify thickness or printability",
+  "implementation": "paper",
+  "input_up_axis": "y",
+  "output_up_axis": "z",
+  "source_commit": "a77ef04115b1383a58f228a7f67ce4434c9d09f3",
+  "source_path": "/home/jacob/S3_DeformFDM/DataSet/TET_MODEL/ring.tet",
+  "sha256": "2591380f2e65a63641dde6aac73d3e06801f0e4a8525c66e2bdbfc04a4695807",
+  "config": {
+    "alpha": 30.0,
+    "beta": 10.0,
+    "gamma": 10.0,
+    "weight_sf": 1.0,
+    "weight_sr": 0.0,
+    "weight_sq": 0.0,
+    "rigidity": 1.0,
+    "scale_compatibility": 6.0,
+    "inner_iterations": 7,
+    "max_outer_iterations": 2,
+    "relative_tolerance": 0.05,
+    "objective_tolerance": 1e-08,
+    "final_conformal_weight": 10.0,
+    "concavity_control": true,
+    "nozzle_cone_angle": 60.0,
+    "concavity_exponent": 1.0,
+    "exclude_build_plate": true
+  },
+  "history": [
+    {
+      "outer": 1,
+      "pi": 62.326307424218086,
+      "worst_angle_degrees": 53.60725737213078,
+      "relative_change": 0.8558513351334373,
+      "inverted_cells": 0,
+      "min_determinant": 0.17073051716540635,
+      "max_determinant": 1.3599383742750721,
+      "local_collision_pairs": 0,
+      "seconds": 117.59270876799997
+    },
+    {
+      "outer": 2,
+      "pi": 49.29404725051863,
+      "worst_angle_degrees": 40.521784596639385,
+      "relative_change": 0.20909726104895987,
+      "inverted_cells": 0,
+      "min_determinant": 0.15045793170854774,
+      "max_determinant": 1.3917490779016657,
+      "local_collision_pairs": 34969,
+      "seconds": 127.54145924900001
+    }
+  ],
+  "layers": [
+    {
+      "file": "0000.obj",
+      "level": 7.432883843965109,
+      "vertices": 392,
+      "faces": 712
+    },
+    {
+      "file": "0001.obj",
+      "level": 22.298651531895327,
+      "vertices": 688,
+      "faces": 1238
+    },
+    {
+      "file": "0002.obj",
+      "level": 37.16441921982555,
+      "vertices": 452,
+      "faces": 791
+    },
+    {
+      "file": "0003.obj",
+      "level": 52.03018690775576,
+      "vertices": 422,
+      "faces": 731
+    },
+    {
+      "file": "0004.obj",
+      "level": 66.89595459568598,
+      "vertices": 445,
+      "faces": 775
+    },
+    {
+      "file": "0005.obj",
+      "level": 81.7617222836162,
+      "vertices": 673,
+      "faces": 1214
+    },
+    {
+      "file": "0006.obj",
+      "level": 96.62748997154641,
+      "vertices": 781,
+      "faces": 1376
+    },
+    {
+      "file": "0007.obj",
+      "level": 111.49325765947663,
+      "vertices": 317,
+      "faces": 552
+    }
+  ],
+  "stop_reason": "iteration_limit",
+  "initial_pi": 432.37519738329223,
+  "seconds": 248.79914414100006,
+  "versions": {
+    "python": "3.13.5 (main, Jun 25 2025, 18:55:22) [GCC 14.2.0]",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1"
+  },
+  "input_precision": "float32; run before paper reader changed to float64",
+  "validation_scope": "Two-outer-pass smoke experiment, not converged replication of publication results"
+}

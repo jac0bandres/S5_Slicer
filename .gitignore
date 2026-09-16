@@ -1,4 +1,6 @@
 .venv
+.venv-s3/
+.pytest_cache/
 slicer/__pycache__
 pickle_files
 _skipped.face

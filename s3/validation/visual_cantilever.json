@@ -1,0 +1,474 @@
+{
+  "status": "deformation/layers/toolpaths for visual inspection",
+  "print_ready": false,
+  "visualization": {
+    "layers": {
+      "mode": "fixed",
+      "requested_count": 12,
+      "delivered_count": 12,
+      "coverage_certified": false
+    },
+    "toolpath_config": {
+      "spacing": 0.8,
+      "waypoint_distance": 0.4,
+      "boundary_count": 2,
+      "mode": "contour",
+      "max_faces": 150000,
+      "max_paths": 10000
+    },
+    "toolpaths": [
+      {
+        "index": 0,
+        "level": 1.226612539472056,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 2,
+        "closed_curves": 2,
+        "waypoints": 38,
+        "length": 8.311482826901873,
+        "refined_faces": 64,
+        "components": 2,
+        "boundary_distance_max": 0.8178955037165142,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 1,
+        "level": 3.6798376184161676,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 7,
+        "closed_curves": 7,
+        "waypoints": 431,
+        "length": 82.13322037972542,
+        "refined_faces": 768,
+        "components": 2,
+        "boundary_distance_max": 2.824883735976467,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 2,
+        "level": 6.13306269736028,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 12,
+        "closed_curves": 12,
+        "waypoints": 1347,
+        "length": 229.11542892720206,
+        "refined_faces": 2464,
+        "components": 2,
+        "boundary_distance_max": 4.4638769598876955,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 3,
+        "level": 8.586287776304392,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 16,
+        "closed_curves": 16,
+        "waypoints": 2013,
+        "length": 351.53602172971347,
+        "refined_faces": 3232,
+        "components": 2,
+        "boundary_distance_max": 6.184810702214447,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 4,
+        "level": 11.039512855248503,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 16,
+        "closed_curves": 16,
+        "waypoints": 2294,
+        "length": 385.2084215319857,
+        "refined_faces": 3968,
+        "components": 2,
+        "boundary_distance_max": 6.112507100027906,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 5,
+        "level": 13.492737934192617,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 15,
+        "closed_curves": 15,
+        "waypoints": 2134,
+        "length": 381.38706904981353,
+        "refined_faces": 3664,
+        "components": 1,
+        "boundary_distance_max": 6.0798195029343205,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 6,
+        "level": 15.945963013136728,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 10,
+        "closed_curves": 10,
+        "waypoints": 1912,
+        "length": 347.76528836872427,
+        "refined_faces": 3376,
+        "components": 1,
+        "boundary_distance_max": 6.106835987484154,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 7,
+        "level": 18.39918809208084,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 11,
+        "closed_curves": 11,
+        "waypoints": 1734,
+        "length": 282.01017527485243,
+        "refined_faces": 2944,
+        "components": 1,
+        "boundary_distance_max": 6.115819804393316,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 8,
+        "level": 20.852413171024953,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 8,
+        "closed_curves": 8,
+        "waypoints": 1147,
+        "length": 203.6137068726485,
+        "refined_faces": 1984,
+        "components": 1,
+        "boundary_distance_max": 6.186214251860602,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 9,
+        "level": 23.305638249969064,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 6,
+        "closed_curves": 6,
+        "waypoints": 722,
+        "length": 120.86417619987407,
+        "refined_faces": 2496,
+        "components": 1,
+        "boundary_distance_max": 4.5517652518329585,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 10,
+        "level": 25.758863328913176,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 3,
+        "closed_curves": 3,
+        "waypoints": 222,
+        "length": 43.54567005133535,
+        "refined_faces": 384,
+        "components": 1,
+        "boundary_distance_max": 2.7570183299270603,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      },
+      {
+        "index": 11,
+        "level": 28.21208840785729,
+        "mode": "contour",
+        "config": {
+          "spacing": 0.8,
+          "waypoint_distance": 0.4,
+          "boundary_count": 2,
+          "mode": "contour",
+          "max_faces": 150000,
+          "max_paths": 10000
+        },
+        "curves": 1,
+        "closed_curves": 1,
+        "waypoints": 29,
+        "length": 4.519901768689345,
+        "refined_faces": 48,
+        "components": 1,
+        "boundary_distance_max": 0.815475944319698,
+        "negative_distance_vertices": 0,
+        "components_below_first_offset": 0,
+        "coverage_certified": false
+      }
+    ],
+    "total_curves": 107,
+    "total_waypoints": 14023,
+    "total_length": 2440.010562981466,
+    "empty_layer_indices": [],
+    "coordinates": "original material space",
+    "travel_planning": false,
+    "coverage_certified": false
+  },
+  "implementation": "paper",
+  "input_up_axis": "z",
+  "output_up_axis": "z",
+  "source_commit": "a77ef04115b1383a58f228a7f67ce4434c9d09f3",
+  "source_path": "/home/jacob/S5_Slicer/s3/tests/fixtures/cantilever.tet",
+  "sha256": "af0a2538a643f01d347a54ad3094d173d90b5f73dd3aea7755708c06b9c6785d",
+  "objectives_path": null,
+  "objectives_sha256": null,
+  "input_precision": "float64",
+  "config": {
+    "alpha": 30.0,
+    "beta": 10.0,
+    "gamma": 10.0,
+    "weight_sf": 1.0,
+    "weight_sr": 0.0,
+    "weight_sq": 0.0,
+    "rigidity": 1.0,
+    "scale_compatibility": 6.0,
+    "inner_iterations": 7,
+    "max_outer_iterations": 20,
+    "relative_tolerance": 0.05,
+    "objective_tolerance": 1e-08,
+    "final_conformal_weight": 10.0,
+    "concavity_control": true,
+    "nozzle_cone_angle": 60.0,
+    "concavity_exponent": 1.0,
+    "exclude_build_plate": true
+  },
+  "history": [
+    {
+      "outer": 1,
+      "pi": 1.588138110996011,
+      "worst_angle_degrees": 12.787586483177238,
+      "relative_change": 0.6208599539835395,
+      "inverted_cells": 0,
+      "min_determinant": 0.9742008148939039,
+      "max_determinant": 1.0281187569133887,
+      "local_collision_pairs": 0,
+      "seconds": 0.09158951800054638
+    },
+    {
+      "outer": 2,
+      "pi": 0.7203710479998664,
+      "worst_angle_degrees": 5.076480842541315,
+      "relative_change": 0.5464052886760075,
+      "inverted_cells": 0,
+      "min_determinant": 0.9116678025607515,
+      "max_determinant": 1.0083279352634942,
+      "local_collision_pairs": 23,
+      "seconds": 0.09221125600015512
+    },
+    {
+      "outer": 3,
+      "pi": 0.6909779146036453,
+      "worst_angle_degrees": 5.0388708724267275,
+      "relative_change": 0.04080276890337564,
+      "inverted_cells": 0,
+      "min_determinant": 0.9059616434975637,
+      "max_determinant": 1.0041530147911912,
+      "local_collision_pairs": 17,
+      "seconds": 0.09522423800081015
+    }
+  ],
+  "layers": [
+    {
+      "file": "0000.obj",
+      "level": 1.226612539472056,
+      "inserted": false,
+      "vertices": 8,
+      "faces": 4,
+      "curves": 2
+    },
+    {
+      "file": "0001.obj",
+      "level": 3.6798376184161676,
+      "inserted": false,
+      "vertices": 8,
+      "faces": 4,
+      "curves": 7
+    },
+    {
+      "file": "0002.obj",
+      "level": 6.13306269736028,
+      "inserted": false,
+      "vertices": 17,
+      "faces": 14,
+      "curves": 12
+    },
+    {
+      "file": "0003.obj",
+      "level": 8.586287776304392,
+      "inserted": false,
+      "vertices": 21,
+      "faces": 20,
+      "curves": 16
+    },
+    {
+      "file": "0004.obj",
+      "level": 11.039512855248503,
+      "inserted": false,
+      "vertices": 20,
+      "faces": 18,
+      "curves": 16
+    },
+    {
+      "file": "0005.obj",
+      "level": 13.492737934192617,
+      "inserted": false,
+      "vertices": 20,
+      "faces": 22,
+      "curves": 15
+    },
+    {
+      "file": "0006.obj",
+      "level": 15.945963013136728,
+      "inserted": false,
+      "vertices": 20,
+      "faces": 22,
+      "curves": 10
+    },
+    {
+      "file": "0007.obj",
+      "level": 18.39918809208084,
+      "inserted": false,
+      "vertices": 12,
+      "faces": 12,
+      "curves": 11
+    },
+    {
+      "file": "0008.obj",
+      "level": 20.852413171024953,
+      "inserted": false,
+      "vertices": 12,
+      "faces": 12,
+      "curves": 8
+    },
+    {
+      "file": "0009.obj",
+      "level": 23.305638249969064,
+      "inserted": false,
+      "vertices": 12,
+      "faces": 12,
+      "curves": 6
+    },
+    {
+      "file": "0010.obj",
+      "level": 25.758863328913176,
+      "inserted": false,
+      "vertices": 4,
+      "faces": 2,
+      "curves": 3
+    },
+    {
+      "file": "0011.obj",
+      "level": 28.21208840785729,
+      "inserted": false,
+      "vertices": 4,
+      "faces": 2,
+      "curves": 1
+    }
+  ],
+  "stop_reason": "relative_stagnation",
+  "initial_pi": 4.188790204786391,
+  "seconds": 1.4476415619974432,
+  "versions": {
+    "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1"
+  }
+}
