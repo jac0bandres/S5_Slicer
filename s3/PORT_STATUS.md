@@ -23,7 +23,7 @@ Comparison source: `S3_DeformFDM`, commit
 | Adaptive partial layers, §4.2 | Implemented in API/CLI/viewer; limited validation | Planar spacing, insertion/partial removal and hanging-edge repair tested; broad geometry/coverage validation remains |
 | Contour/stress-directed surface toolpaths, §5.1 | Implemented for visual inspection | Surface confinement, holes, islands, waypoint spacing and constant/sign-flipped stress tested; general coverage and stress-fit accuracy remain |
 | Deformation/layer/toolpath visualization | Implemented | Streamlit workflow/export tests and Chrome rendering of offline HTML preview |
-| S5 printer motion/G-code adapter | Geometric pose adapter implemented | Pose round trips and unreachable orientations tested; motion transitions, extrusion and collisions pending |
+| S5 printer motion/G-code adapter | Cura + S4/S5 deform/reform integrated in API/CLI/workbench | Signed inverse mapping, Cura modes/retractions/timing, volume correction and real engine/UI tests; interpolation and collisions remain unvalidated |
 
 “Implemented” does not establish replication of the paper's experimental results.
 Do not call this the completed S³ pipeline or a print-ready slicer yet.
@@ -79,7 +79,8 @@ identically.
 - `final_conformal_weight=10` applies to SQ-C in the final inner step (§3.3.1).
 - Isosurface triangulation chooses the shorter quad diagonal. Near-level vertex
   values receive an epsilon perturbation; ordering of vertices/faces is not a
-  replication target. Fixed-count layers do not enforce physical thickness.
+  replication target. Fixed-count layers enforce a physical first-layer height cap, but not subsequent
+  inter-layer thickness.
 - Degenerate geometric inputs/directions are rejected instead of propagating NaNs.
 
 These choices must accompany any claim of fidelity. “Paper-based” is more
@@ -120,8 +121,8 @@ milestone. None of these numbers establish an improvement over S³.
 
 The requested final target is the existing S5 printer. Its default Core-R-Theta
 writer has X/Z/B/C axes and a radial-plane nozzle-orientation restriction; S³'s
-general 3D directions need a reachability check. The final adapter must expose
-unreachable directions rather than silently treating clipping as a valid pose.
+general 3D directions need a reachability check. The adapter reports orientation differences. Export now projects normals into
+the radial plane by default at the user's request; exact-pose enforcement is optional.
 S³'s paper separates geometric slicing from robot motion planning; adapting the
 latter to this printer is an explicitly machine-specific extension.
 
@@ -129,7 +130,8 @@ latter to this printer is an explicitly machine-specific extension.
 offset and B range −130° to +30°. It maps tip positions and printing directions
 to X/Z/B/C poses, unwraps C near the preceding yaw, and rejects unreachable
 directions. These are software conventions copied from S5, not measured hardware
-calibration. It does not yet emit G-code or check travel limits and collisions.
+calibration. `gcode.py` now emits this dialect with endpoint preflight, extrusion, and lifted
+stroke transitions. Travel limits and collisions remain unchecked.
 
 `adaptive.adaptive_layers` is an experimental Python API. Triangle-to-surface
 distance bounds drive initial spacing, midpoint insertion and conservative
@@ -176,7 +178,7 @@ The workbench supports original/final deformation views and interpolation,
 individual or accumulated toolpaths, surface-normal arrows, adaptive/fixed layer
 selection, stale-result notices, and ZIP download. The CLI produces the same
 OBJ/JSON paths and a self-contained interactive HTML preview. G-code and machine
-motion are outside this milestone at the user's request.
+motion were outside that visual milestone; the initial writer is documented below.
 
 Validation includes a 12-layer cantilever example at 0.8 mm path spacing:
 107 closed strokes, 14,023 waypoints, and no empty layers. The underlying
@@ -239,3 +241,75 @@ The C++ comparison path is derived from zhangty019's BSD-3-Clause source; its
 notice is retained in `LICENSE.upstream`. The surrounding repository retains
 its existing license. Python implementation and fidelity notes by GPT Astra,
 2026-09-12, at the project owner's request.
+
+## Initial G-code writer (2026-09-23)
+
+`gcode.py` exports existing S3 strokes through the S5 pose adapter, with strict
+reachability rejection, continuous C, relative extrusion from supplied bead
+dimensions, inverse-time feeds, and retracted/lifted stroke transitions. CLI
+`--gcode` and workbench Download controls expose it. Preflight finishes before
+opening the destination. Tests cover reconstructed endpoints, volume, stroke
+closure, yaw seams, travel without deposition, invalid geometry, and CLI export.
+
+This is not a full robot motion planner. Constant bead height is supplied by the
+caller rather than derived from the scalar field; adaptive thickness compensation,
+axis travel limits, interpolation error and collision validation remain pending.
+Machine placement and calibration are caller responsibilities. Reports continue
+to mark output as not print-ready. See README.md for settings and startup scripts.
+
+## Bed-referenced first layer
+
+Both fixed-count and adaptive layer generation now choose the first isovalue
+using a physical Z=0 height bound and validate the complete extracted surface.
+The configured first-layer height is independent of scalar-field compression.
+Adaptive reports include measured minimum/maximum first-layer Z and the cap.
+The workbench displays actual generated adaptive surfaces and invalidates that
+preview when settings change. G-code preflight independently checks the first
+nonempty deposition layer against the supplied bead height. Tests cover scalar
+compression, disconnected components, elevated starts, the cantilever at
+100/300/400% scale, empty initial path layers, and the adaptive preview.
+
+## Optional machine-limit enforcement
+
+At the user's request, G-code export no longer blocks on exact normal
+reachability or the nominal B range by default. It projects each normal onto
+the radial plane, preserves the tip position, and emits B without clipping.
+The report records orientation differences and out-of-range B counts. Exact
+reachability and B-limit enforcement remain available as an explicit opt-in
+(`enforce_machine_limits=true`). The separately requested first-layer height
+bound and malformed-input validation remain in place.
+
+## Direct G-code download
+
+The workbench now encodes G-code automatically when toolpaths exist and updates
+it when export settings change. There is no Prepare step or machine-limit gate.
+Export no longer rejects paths based on first-layer or below-bed Z; the physical
+first-layer bound remains part of generation. Compatibility previews are optional
+and do not block downloads. CLI/API exact-pose checking is still opt-in.
+
+## Cura / S4-S5 export replaces research-stroke G-code
+
+At the user's request, `s3.cura` now slices the S3-deformed boundary with the
+installed CuraEngine and reforms Cura's existing moves through the tetrahedral
+map. CLI `--gcode` and the workbench Cura slicing tab use this path, independently
+of research surface contours. Cura owns deposition coverage planning, including
+walls, infill, skin, and top/bottom layers. The old standalone `s3.gcode` API is
+retained for compatibility but is no longer the UI/CLI export route.
+
+The port uses S4's existing radial-plane SVD tilt recovery and S5's signed
+barycentric interpolation, centered Cura coordinate frame, and volume-ratio
+extrusion compensation. PyVista/VTK supplies tetrahedron containment and closest
+cell lookup. Unlike the historical parser, absolute extrusion, G92 and relative
+XYZ are normalized explicitly; extrusion-only unretractions are never mistaken
+for deposition. Exterior moves use nearest-cell affine extension and are reported,
+not dropped. Cura role/layer comments and non-motion thermal/fan commands persist.
+The machine adapter emits continuous X/Z/B/C with S5 nozzle compensation and
+inverse-time timing without machine-limit rejection. This is not a claim of
+arbitrary-orientation robot motion or swept collision validation.
+
+Settings are supplied in both Cura global and extruder scopes so the train's
+default filament diameter cannot override the selected material. First-layer
+selection uses the physical bed-height bound; other Cura layers are in deformed
+space. Tests exercise identity/affine inverse maps, exterior extrapolation,
+extrusion modes/resets, retractions, source timing, volume compensation, real
+Cura layer counts/filament diameter, and download without research toolpaths.

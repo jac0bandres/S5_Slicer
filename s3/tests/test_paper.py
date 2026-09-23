@@ -5,6 +5,8 @@ from s3.mesh import TetMesh
 from s3.paper import (project_sphere_halfspaces,project_printing_direction,
                       blend_quaternions,paper_scale_system,solve_paper_scales)
 from s3.pipeline import PaperConfig,Objectives,run_paper,concavity_weights
+from s3.paper import QuaternionBlendWorkspace
+from s3.numerics import from_two_vectors,from_two_vectors_batch
 
 
 @pytest.fixture
@@ -59,6 +61,54 @@ def test_eq8_pairwise_weighted_solution(mesh):
     np.testing.assert_allclose(actual,expected,atol=1e-14)
 
 
+def test_eq8_reuses_factor_and_invalidates_changed_constraints(mesh):
+    workspace=QuaternionBlendWorkspace()
+    rotations=Rotation.from_euler('z',[[20],[60]],degrees=True).as_matrix()
+    targets=Rotation.from_euler('z',[[10],[90]],degrees=True).as_matrix()
+    keep=np.array([2.,3.]); edges=np.array([5.])
+    def solve(fixed=None):
+        actual=blend_quaternions(mesh,rotations,targets,keep,edges,
+                                 fixed_identity=fixed,workspace=workspace)
+        expected=blend_quaternions(mesh,rotations,targets,keep,edges,fixed_identity=fixed)
+        np.testing.assert_allclose(actual,expected,atol=1e-14)
+        return workspace.solver.factor
+    factor=solve()
+    targets[:]=Rotation.from_euler('x',[[30],[45]],degrees=True).as_matrix()
+    assert solve() is factor
+    keep[0]=10.  # Final SQ-C adjustment; arrays can be mutated in place.
+    changed=solve()
+    assert changed is not factor
+    edges[0]=7.
+    assert solve() is not changed
+    factor=workspace.solver.factor
+    assert solve([0]) is not factor
+    assert solve([0,1]) is None  # Every variable pinned.
+    keep[:]=0
+    factor=solve()  # Gauge anchor on a component without targets.
+    rotations[:]=Rotation.from_euler('y',[[40],[80]],degrees=True).as_matrix()
+    assert solve() is factor  # Anchor values must still follow current rotations.
+
+
+def test_batched_rotations_match_scalar():
+    rng=np.random.default_rng(51)
+    a=np.vstack([rng.normal(size=(100,3)),[0,0,1],[0,0,-1],[1e-8,0,-1]])
+    b=np.array([0.,0.,1.])
+    expected=np.array([from_two_vectors(v,b) for v in a])
+    np.testing.assert_allclose(from_two_vectors_batch(a,b),expected,atol=1e-14)
+
+
+def test_projection_fast_path_and_preferred_boundary_tie():
+    direction=np.array([1.,0.,0.])
+    np.testing.assert_array_equal(project_sphere_halfspaces(direction,[[1,0,0]],[.5]),direction)
+    # A nearby boundary candidate is tied within tolerance and preferred.
+    a=np.array([[1.,1e-6,0.]])
+    a/=np.linalg.norm(a)
+    b=[a[0,0]-1e-12]
+    result=project_sphere_halfspaces(direction,a,b,preferred=[0,1,0])
+    assert result[1]>0
+    assert np.all(a@result>=np.array(b)-1e-10)
+
+
 def test_eq12_residual_matches_written_energy(mesh):
     rng=np.random.default_rng(2)
     rotations=Rotation.random(2,random_state=rng).as_matrix()
@@ -88,6 +138,58 @@ def test_eq12_uniform_rigid_and_stationarity(mesh):
     np.testing.assert_allclose(derivative[3:],0,atol=1e-12)
 
 
+@pytest.mark.parametrize('fixed',[None,[0,1,2],[0,1,2,3,4]])
+def test_eq12_iterative_matches_direct(mesh,fixed):
+    rotations=Rotation.from_euler('xyz',[[20,10,40],[-10,30,5]],degrees=True).as_matrix()
+    direct=solve_paper_scales(mesh,rotations,fixed_vertices=fixed,solver='direct')
+    messages=[]
+    iterative=solve_paper_scales(mesh,rotations,fixed_vertices=fixed,solver='iterative',
+                                tolerance=1e-11,progress=messages.append)
+    for actual,expected in zip(iterative,direct):
+        np.testing.assert_allclose(actual,expected,atol=1e-8)
+    assert any('CG converged' in message for message in messages)
+    if fixed is not None:np.testing.assert_array_equal(iterative[0][fixed],mesh.points[fixed])
+
+
+def test_eq12_iterative_failure_is_explicit(mesh):
+    rotations=Rotation.from_euler('xyz',[[20,10,40],[-10,30,5]],degrees=True).as_matrix()
+    with pytest.raises(ValueError,match='did not converge'):
+        solve_paper_scales(mesh,rotations,solver='iterative',max_iterations=1,tolerance=1e-14)
+
+
+def test_eq12_checks_true_residual(mesh,monkeypatch):
+    monkeypatch.setattr('s3.numerics.cg',lambda a,b,**kwargs: (np.zeros(len(b)),0))
+    with pytest.raises(ValueError,match='did not converge'):
+        solve_paper_scales(mesh,np.tile(np.eye(3),(2,1,1)),solver='iterative')
+
+
+def test_eq12_iterative_disconnected_gauges(mesh):
+    disconnected=TetMesh(np.vstack([mesh.points,mesh.points+[10,0,0]]),
+                         np.vstack([mesh.cells,mesh.cells+len(mesh.points)]))
+    rotations=Rotation.from_euler('z',[[10],[20],[30],[40]],degrees=True).as_matrix()
+    direct=solve_paper_scales(disconnected,rotations,solver='direct')
+    iterative=solve_paper_scales(disconnected,rotations,solver='iterative')
+    np.testing.assert_allclose(iterative[0],direct[0],atol=1e-7)
+    np.testing.assert_array_equal(iterative[0][disconnected.anchors],disconnected.points[disconnected.anchors])
+
+
+def test_iterative_pipeline_matches_direct():
+    from pathlib import Path
+    from s3.mesh import read_tet
+    mesh=read_tet(Path(__file__).parent/'fixtures/cantilever.tet')
+    direct=run_paper(mesh,PaperConfig(max_outer_iterations=2,scale_solver='direct'))
+    iterative=run_paper(mesh,PaperConfig(max_outer_iterations=2,scale_solver='iterative'))
+    np.testing.assert_allclose(iterative['deformed'],direct['deformed'],atol=1e-6)
+    assert iterative['stop_reason']==direct['stop_reason']
+    assert iterative['build_plate']['below_plate_vertices']==0
+
+
+@pytest.mark.parametrize('settings',[dict(scale_solver='other'),dict(scale_tolerance=0),
+    dict(scale_max_iterations=0),dict(scale_max_iterations=1.5)])
+def test_invalid_scale_solver_config(settings):
+    with pytest.raises(ValueError):PaperConfig(**settings)
+
+
 def test_height_transfer_and_objective_metric(mesh):
     # This analytic case measures the unconstrained paper objective.
     result=run_paper(mesh,PaperConfig(max_outer_iterations=3,fix_build_plate=False))
@@ -97,6 +199,28 @@ def test_height_transfer_and_objective_metric(mesh):
     assert pi<1e-8
     assert result['stop_reason']=='objective_tolerance'
     assert result['initial_pi']>pi
+
+
+def test_progress_reports_work_before_outer_iteration_completes(mesh):
+    events=[]
+    rows=[]
+    cfg=PaperConfig(max_outer_iterations=3,fix_build_plate=False)
+    def completed(row):
+        assert any('Eq. 7' in e['message'] for e in events)
+        assert any('Eq. 8' in e['message'] for e in events)
+        assert any('Eq. 12' in e['message'] for e in events)
+        assert any('Factoring sparse matrix' in e['message'] and 'nonzeros' in e['message'] for e in events)
+        assert any('Solving factored system' in e['message'] for e in events)
+        rows.append(row)
+    result=run_paper(mesh,cfg,callback=completed,progress_callback=events.append)
+    assert rows==result['history']
+    assert events[0]['message']=='Preparing build-plate constraints'
+    assert any('Inner 1/7' in e['message'] and 'active cells' in e['message'] for e in events)
+    assert events[-1]['message'].startswith('Finished · ')
+    assert all(a['elapsed_seconds']<=b['elapsed_seconds'] for a,b in zip(events,events[1:]))
+    baseline=run_paper(mesh,cfg)
+    np.testing.assert_array_equal(result['deformed'],baseline['deformed'])
+    assert result['stop_reason']==baseline['stop_reason']
 
 
 def test_sr_requires_supplied_critical_region(mesh):

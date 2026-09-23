@@ -7,17 +7,20 @@ import hashlib
 import tempfile
 import time
 import zipfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from s3.mesh import TetMesh, read_tet, write_tet
+from s3.placement import Placement
 from s3.pipeline import PaperConfig, run_paper
-from s3.layers import isosurface, write_layers
+from s3.layers import isosurface, write_layers, fixed_layers
 from s3.adaptive import AdaptiveConfig
 from s3.toolpaths import ToolpathConfig
+from s3.cura import CuraConfig, slice_with_cura
+from s3.gcode_preview import gcode_motion_preview
 from s3.visual_pipeline import build_visualization,write_visualization
 from s3.visualization import deformation_figure,toolpath_figure
 from s3.stl_import import tetrahedralize, SUFFIXES
@@ -47,24 +50,28 @@ def apply_up_axis(mesh, up_axis):
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
-def load_mesh(payload, up_axis, kind='tet'):
+def load_mesh(payload, up_axis, kind='tet', repair=True):
+    """Return (mesh, notes); notes records the surface repair/tetrahedralization."""
+    notes = []
     if kind == 'tet':
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'input.tet'
             path.write_bytes(payload)
             mesh = read_tet(path)
     else:
-        mesh = tetrahedralize(payload, kind)
-    return apply_up_axis(mesh, up_axis)
+        mesh = tetrahedralize(payload, kind, repair=repair, notes=notes)
+    return apply_up_axis(mesh, up_axis), notes
 
 
-def bundle(result, report, count, visual=None):
+def bundle(result, report, count, visual=None, first_layer_height=.2):
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         np.savez_compressed(root/'result.npz', **{k:v for k,v in result.items() if isinstance(v,np.ndarray)})
         write_tet(root/'deformed.tet', result['deformed'], result['cells'])
-        if visual is None:
-            manifest = write_layers(TetMesh(result['points'], result['cells']), result['scalar'], count, root/'layers')
+        if visual is None and not count:
+            manifest = []
+        elif visual is None:
+            manifest = write_layers(TetMesh(result['points'], result['cells']), result['scalar'], count, root/'layers', first_layer_height=first_layer_height)
         else:
             layers,paths,visual_report=visual
             manifest=write_visualization(root,result,layers,paths,visual_report)
@@ -77,11 +84,20 @@ def bundle(result, report, count, visual=None):
         return output.getvalue()
 
 
+def reset_placement():
+    for name,value in dict(scale=100.,rotation_x=0.,rotation_y=0.,rotation_z=0.,
+                           center_xy=False,drop_to_bed=True,offset_x=0.,offset_y=0.).items():
+        st.session_state['placement_'+name]=value
+
+
 def main():
     st.set_page_config(page_title='S³ Research Workbench', page_icon='🧊', layout='wide')
+    gcode_sidebar_slot=st.sidebar.container()
+    st.session_state['ready_gcode_download']=None
+    st.session_state['gcode_download_status']='Run the paper pipeline, then click Slice with Cura in the Cura slicing tab.'
     st.title('S³ Research Workbench')
-    st.caption('Paper-based deformation • adaptive curved layers • surface toolpaths')
-    st.info('Inspect deformation and sampled deposition strokes here. Fixed-count layers are previews; adaptive spacing checks and path diagnostics are available below.')
+    st.caption('S3 deformation • Cura slicing • S4/S5 G-code reformation')
+    st.info('Run the S3 deformation, then use Cura slicing to generate walls, infill and G-code. Research layer/path views are optional diagnostics.')
     with st.sidebar:
         st.header('Mesh')
         examples = {'Cantilever · quick test': ROOT/'tests/fixtures/cantilever.tet'}
@@ -93,9 +109,24 @@ def main():
             upload = st.file_uploader('Tetrahedral mesh', type=['tet'])
         elif source=='Upload STL / surface':
             surface = st.file_uploader('Surface mesh (tetrahedralized on upload)', type=list(SUFFIXES),
-                help='STL/OBJ/PLY/OFF surfaces are volume-meshed with TetGen. Watertight, self-intersection-free surfaces work best.')
+                help='STL/OBJ/PLY/OFF surfaces are volume-meshed with TetGen. Holes, flipped normals and '
+                     'self-intersections are repaired automatically.')
+        repair_surfaces = st.checkbox('Automatic mesh repair', True, disabled=source!='Upload STL / surface',
+            help='Close holes and remove self-intersections (MeshFix), then fall back to FloatTetWild when '
+                 'TetGen still cannot mesh the surface. Off: TetGen on the uploaded surface only.')
         axis = st.selectbox('Input up axis', ['Z','Y'], index=1 if source.startswith('Official') else 0,
                             help='Official S³ datasets use Y-up. All displayed results use Z-up.')
+        with st.expander('Scale, rotate and place',expanded=True):
+            scale=st.number_input('Model scale (%)',min_value=.01,value=100.,step=10.,key='placement_scale')
+            rotation_x=st.number_input('Rotate X (degrees)',value=0.,step=90.,key='placement_rotation_x')
+            rotation_y=st.number_input('Rotate Y (degrees)',value=0.,step=90.,key='placement_rotation_y')
+            rotation_z=st.number_input('Rotate Z (degrees)',value=0.,step=90.,key='placement_rotation_z')
+            center_xy=st.checkbox('Center XY on rotation axis',False,key='placement_center_xy')
+            drop_to_bed=st.checkbox('Drop model to bed',True,key='placement_drop_to_bed')
+            offset_x=st.number_input('X placement offset (mm)',value=0.,step=5.,key='placement_offset_x')
+            offset_y=st.number_input('Y placement offset (mm)',value=0.,step=5.,key='placement_offset_y')
+            st.button('Reset placement',on_click=reset_placement)
+            st.caption('Uniform scale; rotations about the model center, applied X → Y → Z after up-axis conversion. Offsets apply after centering. Rerun slicing after changes.')
         st.header('Objectives')
         sf = st.slider('Support-free weight', 0., 1., 1., .05)
         sr = st.slider('Strength weight', 0., 1., 0., .05)
@@ -121,6 +152,8 @@ def main():
                 help='On: reject inputs with pockets/regions that do not drain to the plate (a build-validity '
                      'guarantee). Off: allow experimenting on organic models — some regions may need support.')
         st.header('Run budget')
+        scale_solver=st.selectbox('Eq. 12 solver',['Automatic','Iterative (CG)','Direct (LU)'],
+            help='Automatic uses iterative CG for at least 10,000 free unknowns. CG avoids LU factorization and reports residual progress. Direct LU remains available for comparison.')
         outer = st.number_input('Maximum outer iterations', 1, 100, 5)
         inner = st.number_input('Inner iterations', 1, 50, 7)
         tolerance = st.number_input('Relative stopping tolerance', .0001, .99, .05, format='%.4f')
@@ -138,9 +171,15 @@ def main():
         if payload is None:
             st.info('Upload a .tet mesh or an STL/OBJ/PLY/OFF surface to begin. '
                     'Surfaces are tetrahedralized with TetGen on upload.')
-            return
+            return gcode_sidebar_slot
         with st.spinner('Tetrahedralizing surface…' if kind!='tet' else 'Reading mesh…'):
-            mesh = load_mesh(payload, axis, kind)
+            input_mesh, mesh_notes = load_mesh(payload, axis, kind, repair_surfaces)
+            placement=Placement(scale=scale/100,rotation_x=rotation_x,rotation_y=rotation_y,
+                rotation_z=rotation_z,center_xy=center_xy,drop_to_bed=drop_to_bed,
+                offset_x=offset_x,offset_y=offset_y)
+            mesh = placement.apply(input_mesh)
+        for note in mesh_notes:
+            st.caption(note)
         fields = {}
         field_bytes = objective_upload.getvalue() if objective_upload else b''
         if field_bytes:
@@ -150,18 +189,35 @@ def main():
                 fields = {k:data[k] for k in data.files}
             if axis=='Y' and 'stress' in fields:
                 fields['stress'] = fields['stress'] @ np.array([[1,0,0],[0,0,1],[0,-1,0]])
+        if 'stress' in fields:
+            fields['stress']=placement.rotate_vectors(fields['stress'])
         cfg = PaperConfig(alpha=alpha,beta=beta,gamma=gamma,weight_sf=sf,weight_sr=sr,weight_sq=sq,
                           rigidity=rigidity,scale_compatibility=compatibility,concavity_control=concavity,
                           exclude_build_plate=plate,max_outer_iterations=int(outer),inner_iterations=int(inner),
                           fix_build_plate=fix_plate,base_band=base_band,enforce_build_order=enforce_order,
-                          relative_tolerance=tolerance)
+                          relative_tolerance=tolerance,
+                          scale_solver={'Automatic':'auto','Iterative (CG)':'iterative','Direct (LU)':'direct'}[scale_solver])
     except Exception as error:
         st.error(f'Input error: {error}')
-        return
-    fingerprint = hashlib.sha256(payload+field_bytes+axis.encode()+json.dumps(asdict(cfg),sort_keys=True).encode()).hexdigest()
+        return gcode_sidebar_slot
+    fingerprint = hashlib.sha256(payload+field_bytes+axis.encode()+json.dumps(dict(config=asdict(cfg),placement=asdict(placement)),sort_keys=True).encode()).hexdigest()
     a,b = st.columns(2)
     a.metric('Vertices', f'{len(mesh.points):,}')
     b.metric('Tetrahedra', f'{len(mesh.cells):,}')
+    size=np.ptp(mesh.points,axis=0)
+    st.caption(f'Placed size: X {size[0]:.3f} × Y {size[1]:.3f} × Z {size[2]:.3f} mm')
+    with st.expander('Model placement preview',expanded=not bool(st.session_state.get('experiment'))):
+        placement_fig=figure(mesh.points,mesh.faces[mesh.boundary],name='Placed input')
+        span=max(float(size.max()),1.)
+        lo=np.minimum(mesh.points[:,:2].min(axis=0),0)-span*.1
+        hi=np.maximum(mesh.points[:,:2].max(axis=0),0)+span*.1
+        placement_fig.add_trace(go.Mesh3d(x=[lo[0],hi[0],hi[0],lo[0]],
+            y=[lo[1],lo[1],hi[1],hi[1]],z=[0,0,0,0],i=[0,0],j=[1,2],k=[2,3],
+            color='#94a3b8',opacity=.2,name='Z=0 reference',showlegend=True))
+        placement_fig.add_trace(go.Scatter3d(x=[0,0],y=[0,0],z=[0,span],mode='lines',
+            line=dict(color='#ef4444',width=4),name='Rotation axis'))
+        st.plotly_chart(placement_fig,width='stretch')
+        st.caption('Current input placement, before deformation. The shaded plane is Z=0, not the printer bed boundary.')
     if run:
         if sr>0 and not {'stress','stress_mask'} <= fields.keys():
             st.error('Strength optimization needs both stress and stress_mask in the objective NPZ.')
@@ -169,10 +225,19 @@ def main():
             started = time.perf_counter()
             with st.status('Solving paper equations…', expanded=True) as status:
                 progress = st.empty()
+                st.caption('Stage times update as work advances. Sparse solves can take several minutes on large meshes.')
+                iteration_log = st.container()
+                def show_progress(event):
+                    progress.write(f"{event['elapsed_seconds']:.1f}s elapsed · {event['message']}")
+                def show_iteration(row):
+                    iteration_log.write(
+                        f"Outer {row['outer']}/{outer} completed in {row['seconds']:.1f}s · "
+                        f"Π {row['pi']:.5g} · worst violation {row['worst_angle_degrees']:.2f}° · "
+                        f"relative change {row['relative_change']:.2%} · "
+                        f"step {row['step_fraction']:.5g} · inverted cells {row['inverted_cells']}")
                 try:
-                    result = run_paper(mesh,cfg,**fields,callback=lambda row: progress.write(
-                        f"Outer {row['outer']}/{outer} · Π {row['pi']:.5g} · worst violation {row['worst_angle_degrees']:.2f}° · inverted cells {row['inverted_cells']}"))
-                    report = dict(implementation='paper',config=asdict(cfg),input_up_axis=axis,output_up_axis='Z',
+                    result = run_paper(mesh,cfg,**fields,callback=show_iteration,progress_callback=show_progress)
+                    report = dict(implementation='paper',config=asdict(cfg),placement=asdict(placement),input_up_axis=axis,output_up_axis='Z',
                                   mesh_sha256=hashlib.sha256(payload).hexdigest(),
                                   objectives_sha256=hashlib.sha256(field_bytes).hexdigest() if field_bytes else None,
                                   history=result['history'],initial_pi=result['initial_pi'],stop_reason=result['stop_reason'],
@@ -182,15 +247,17 @@ def main():
                     st.session_state['experiment_fields'] = fields
                     st.session_state.pop('export',None)
                     st.session_state.pop('visual',None)
-                    status.update(label='Run finished',state='complete',expanded=False)
+                    st.session_state.pop('cura_export',None)
+                    status.update(label=f"Run finished in {report['seconds']:.1f}s · {result['stop_reason']}",
+                                  state='complete',expanded=True)
                 except Exception as error:
                     status.update(label='Run failed',state='error')
                     st.error(str(error))
                     st.caption('Some combinations of boundary-face objectives are infeasible; the solver reports them instead of relaxing constraints silently.')
     saved = st.session_state.get('experiment')
     if not saved:
-        st.plotly_chart(figure(mesh.points,mesh.faces[mesh.boundary],name='Input'),width='stretch')
-        return
+        return gcode_sidebar_slot
+    st.session_state['gcode_download_status']='Click Slice with Cura in the Cura slicing tab.'
     saved_id,result,report = saved
     if saved_id != fingerprint:
         st.warning('Controls or input changed. The views below still show the last successful run; run again to apply changes.')
@@ -202,7 +269,7 @@ def main():
         st.warning('This saved run does not fix the build-plate contact surface. Global tilting can create layers that do not start from the intended base. Run again with the contact surface fixed.')
     elif report['build_plate']['below_plate_vertices']:
         st.error('The deformation places material below the fixed starting plane. This result does not define a valid build from that plate.')
-    tabs = st.tabs(['Geometry','Curved layers','Toolpaths','Diagnostics','Download'])
+    tabs = st.tabs(['Geometry','Cura slicing','Research layers','Research toolpaths','Diagnostics','Download'])
     with tabs[0]:
         left,right = st.columns(2)
         with left:
@@ -216,29 +283,96 @@ def main():
             st.plotly_chart(deformation_figure(result,amount),width='stretch')
             st.caption('Interpolation between the original and final geometry, with the original shown as a translucent reference.')
     with tabs[1]:
-        layer_mode=st.radio('Layer generation',['Fixed count','Adaptive thickness'],horizontal=True)
+        st.subheader('Cura slicing and S4/S5 reformation')
+        st.write('Cura slices the deformed solid. Its walls, infill, top/bottom layers, travels and extrusion are mapped back into the original model through the tetrahedra.')
+        c1,c2,c3=st.columns(3)
+        cura_height=c1.number_input('Layer height (mm)',min_value=.01,value=.2,step=.01)
+        cura_first=c2.number_input('Cura first-layer height (mm)',min_value=.01,value=.2,step=.01)
+        cura_width=c3.number_input('Line width (mm)',min_value=.01,value=.4,step=.01)
+        c1,c2,c3=st.columns(3)
+        cura_infill=c1.number_input('Infill density (%)',min_value=0.,max_value=100.,value=20.,step=5.)
+        cura_walls=c2.number_input('Wall count',min_value=1,value=2,step=1)
+        cura_speed=c3.number_input('Cura print speed (mm/s)',min_value=.1,value=30.)
+        defaults=CuraConfig()
+        with st.expander('Cura profile and machine settings'):
+            engine=st.text_input('CuraEngine executable',defaults.engine)
+            printer=st.text_input('Printer definition',defaults.printer_definition)
+            extruder=st.text_input('Extruder definition',defaults.extruder_definition)
+            profile=st.text_input('Cura settings profile',defaults.profile)
+            profile_upload=st.file_uploader('Upload Cura settings JSON',type=['json'])
+            diameter=st.number_input('Filament diameter (mm)',min_value=.1,value=1.75)
+            nozzle=st.number_input('Nozzle temperature (°C)',min_value=0.,value=240.)
+            bed=st.number_input('Bed temperature (°C)',min_value=0.,value=55.)
+            segment=st.number_input('Reform segment length (mm)',min_value=.05,value=.6,step=.05)
+            nozzle_offset=st.number_input('Nozzle offset (mm)',min_value=0.,value=41.5)
+        cura_cfg=CuraConfig(engine=engine,printer_definition=printer,extruder_definition=extruder,profile=profile,
+            layer_height=cura_height,first_layer_height=cura_first,line_width=cura_width,
+            infill_density=cura_infill,wall_count=int(cura_walls),print_speed=cura_speed,
+            filament_diameter=diameter,nozzle_temperature=nozzle,bed_temperature=bed,
+            segment_length=segment,nozzle_offset=nozzle_offset)
+        profile_data=profile_upload.getvalue() if profile_upload else b''
+        profile_signature=profile_data
+        if not profile_data and profile and Path(profile).is_file():
+            profile_signature=Path(profile).read_bytes()
+        cura_id=hashlib.sha256(saved_id.encode()+json.dumps(asdict(cura_cfg),sort_keys=True).encode()+profile_signature).hexdigest()
+        if st.button('Slice with Cura',type='primary'):
+            with st.status('Cura deform/reform…',expanded=True) as status:
+                with tempfile.TemporaryDirectory() as folder:
+                    directory=Path(folder)
+                    try:
+                        run_cfg=cura_cfg
+                        if profile_data:
+                            (directory/'profile.json').write_bytes(profile_data)
+                            run_cfg=replace(cura_cfg,profile=str(directory/'profile.json'))
+                        text,cura_report=slice_with_cura(result,directory,run_cfg,callback=st.write)
+                        files={p.name:p.read_bytes() for p in directory.iterdir() if p.is_file()}
+                        st.session_state['cura_export']=(cura_id,saved_id,text,cura_report,files)
+                        st.session_state.pop('cura_failure_log',None)
+                        status.update(label='Cura G-code ready to download',state='complete',expanded=False)
+                    except Exception as exc:
+                        st.session_state.pop('cura_export',None)
+                        log=directory/'cura.log'
+                        if log.exists():st.session_state['cura_failure_log']=log.read_text()
+                        status.update(label='Cura slicing failed',state='error')
+                        st.error(str(exc))
+        cura_saved=st.session_state.get('cura_export')
+        current_cura=cura_saved if cura_saved and cura_saved[0]==cura_id else None
+        if cura_saved and not current_cura:
+            st.info('Cura settings changed. Click Slice with Cura to update the G-code.')
+        if current_cura:
+            st.session_state['ready_gcode_download']=current_cura[2]
+            st.session_state['gcode_download_status']='Ready: Cura toolpaths reformed to S5 X/Z/B/C.'
+            c1,c2=st.columns(2)
+            c1.metric('Cura layers',current_cura[3]['layers'])
+            c2.metric('Reformed moves',f"{current_cura[3]['moves']:,}")
+            st.download_button('Download G-code',current_cura[2],'s3_print.gcode','text/plain',key='cura_tab_download',type='primary')
+            if st.checkbox('Show Cura G-code motion preview',False):
+                motion=gcode_motion_preview(current_cura[2])
+                st.plotly_chart(motion,width='stretch')
+                st.download_button('Download G-code preview HTML',motion.to_html(include_plotlyjs=True),'s3_cura_preview.html','text/html')
+            st.json(current_cura[3],expanded=False)
+        if st.session_state.get('cura_failure_log'):
+            st.download_button('Download Cura error log',st.session_state['cura_failure_log'],'cura.log','text/plain')
+    with tabs[2]:
+        layer_mode=st.radio('Layer generation',['Adaptive thickness','Fixed count'],horizontal=True,
+                            help='Adaptive thickness determines layer count from physical spacing. Fixed count is a diagnostic preview.')
         if layer_mode=='Fixed count':
-            st.info('Fixed count is a sparse visual preview, not a deposition sequence. Its first surface may be well above the plate. Choose Adaptive thickness to inspect layers at physical thicknesses.')
-        count = st.slider('Diagnostic layer count', 1, 100, 12)
+            st.info('The first surface is bounded by the first-layer height. Remaining fixed-count surfaces are sparse diagnostics; choose Adaptive thickness for physical inter-layer spacing.')
+        count = st.slider('Diagnostic layer count', 1, 100, 12) if layer_mode=='Fixed count' else 0
+        first_height=st.number_input('First-layer height (mm)',min_value=.01,value=.2,step=.01)
         adaptive=None
         if layer_mode=='Adaptive thickness':
             c1,c2=st.columns(2)
             minimum=c1.number_input('Minimum layer thickness (mm)',min_value=.01,value=.16,step=.01)
             maximum=c2.number_input('Maximum layer thickness (mm)',min_value=.02,value=.4,step=.01)
+            build_height=float(np.ptp(result['points'][:,2]))
+            st.caption(f'At this height ({build_height:.1f} mm), a planar build would have roughly {int(np.ceil(build_height/maximum))}–{int(np.ceil(build_height/minimum))} layers. Curved and partial layers can change that count.')
             st.caption('Adaptive generation measures distances on curved surfaces and can take longer. The report includes trimming and any unresolved spacing checks.')
             if minimum>=maximum:
                 st.error('Maximum thickness must exceed minimum thickness.')
-            else:adaptive=AdaptiveConfig(minimum=minimum,maximum=maximum,tolerance=min(.005,minimum/10))
-        index = st.slider('Layer index', 1, count, 1) if count>1 else 1
-        scalar = result['scalar']
-        level = float(scalar.min()+(index-.5)*np.ptp(scalar)/count)
-        points,triangles = isosurface(original,scalar.copy(),level)
-        fig = figure(result['points'],faces,name='Layer context',opacity=.12)
-        if len(triangles):
-            fig.add_trace(figure(points,triangles,name='Layer').data[0])
-        st.plotly_chart(fig,width='stretch')
-        st.caption(f'Layer {index}/{count} · scalar value {level:.5g} · {len(triangles):,} triangles. Equal scalar increments need not yield equal physical thickness.')
-    with tabs[2]:
+            else:adaptive=AdaptiveConfig(minimum=minimum,maximum=maximum,tolerance=min(.005,minimum/10),first_layer_height=first_height)
+        layer_preview=st.container()
+    with tabs[3]:
         c1,c2,c3=st.columns(3)
         path_mode=c1.selectbox('Toolpath pattern',['Boundary contours','Stress hybrid'])
         spacing=c2.number_input('Path spacing (mm)',min_value=.05,value=.4,step=.05)
@@ -249,7 +383,7 @@ def main():
         path_cfg=ToolpathConfig(spacing=spacing,waypoint_distance=sample,mode='hybrid' if path_mode=='Stress hybrid' else 'contour',
                                 boundary_count=int(rings),max_faces=int(max_faces))
         visual_id=hashlib.sha256((saved_id+json.dumps(dict(layer_mode=layer_mode,count=count,
-            adaptive=asdict(adaptive) if adaptive else None,paths=asdict(path_cfg)),sort_keys=True)).encode()).hexdigest()
+            adaptive=asdict(adaptive) if adaptive else None,first_layer_height=first_height,paths=asdict(path_cfg)),sort_keys=True)).encode()).hexdigest()
         st.caption('Paths are computed directly on the original curved layers. Stress hybrid uses the stress fields attached to the saved deformation run.')
         if st.button('Generate layers and toolpaths',type='primary'):
             if layer_mode=='Adaptive thickness' and adaptive is None:
@@ -259,7 +393,7 @@ def main():
                     progress=st.empty()
                     try:
                         saved_fields=st.session_state.get('experiment_fields',{})
-                        visual=build_visualization(result,count=count,adaptive=adaptive,toolpath_config=path_cfg,
+                        visual=build_visualization(result,count=count,adaptive=adaptive,toolpath_config=path_cfg,first_layer_height=first_height,
                             stress=saved_fields.get('stress'),stress_mask=saved_fields.get('stress_mask'),
                             callback=lambda row:progress.write(row))
                         st.session_state['visual']=(visual_id,saved_id,*visual)
@@ -285,12 +419,31 @@ def main():
                 cumulative=display=='Through selected layer',show_surface=show_surface,show_normals=show_normals),width='stretch')
             st.caption(f"Layer {selected}: scalar {layers[selected-1].level:.5g} · {'inserted partial layer' if layers[selected-1].inserted else 'full layer'}. Orange: contours; pink: stress interiors. Separate strokes have no implied travel connection.")
             if visual_report['empty_layer_indices']:
-                st.warning('Some layers have no paths at this spacing: '+', '.join(str(i+1) for i in visual_report['empty_layer_indices']))
+                st.caption('Research contour preview only — layers without strokes: '+', '.join(str(i+1) for i in visual_report['empty_layer_indices']))
             if 'spacing_passed' in visual_report['layers'] and not visual_report['layers']['spacing_passed']:
                 st.warning('The delivered adaptive layers do not pass every spacing bound. Inspect the layer report in Diagnostics.')
         else:
             st.write('Generate toolpaths to inspect individual layers, accumulated deposition, and surface normals.')
-    with tabs[3]:
+    with layer_preview:
+        stored_visual=st.session_state.get('visual')
+        preview_layers=None
+        if stored_visual and stored_visual[1]==saved_id and stored_visual[0]==visual_id:
+            preview_layers=stored_visual[2]
+        elif layer_mode=='Fixed count':
+            try:
+                preview_layers,_=fixed_layers(original,result['scalar'],count,first_height)
+            except ValueError as exc:
+                st.error(str(exc))
+        else:
+            st.info('Generate layers and toolpaths to preview the actual adaptive surfaces for these settings.')
+        if preview_layers:
+            index=st.slider('Layer index',1,len(preview_layers),1) if len(preview_layers)>1 else 1
+            layer=preview_layers[index-1]
+            fig=figure(result['points'],faces,name='Layer context',opacity=.12)
+            fig.add_trace(figure(layer.points,layer.faces,name='Layer').data[0])
+            st.plotly_chart(fig,width='stretch')
+            st.caption(f'Layer {index}/{len(preview_layers)} · scalar {layer.level:.5g} · physical Z {layer.points[:,2].min():.4f}–{layer.points[:,2].max():.4f} mm. First-layer limit: {first_height:g} mm.')
+    with tabs[4]:
         history = report['history']
         if history:
             last = history[-1]
@@ -312,20 +465,44 @@ def main():
             st.json(stored_visual[4]['layers'],expanded=False)
             st.dataframe(stored_visual[4]['toolpaths'],width='stretch')
             st.caption('Boundary distances and stress-field integration are numerical approximations. Equal field increments do not certify complete bead coverage.')
-    with tabs[4]:
+    with tabs[5]:
         stored_visual=st.session_state.get('visual')
         valid_visual=stored_visual if stored_visual and stored_visual[1]==saved_id else None
-        export_id=saved_id+(valid_visual[0] if valid_visual else '')
-        st.write('Export arrays, deformed mesh, layer OBJs, and the run report.'+
-                 (' Includes toolpath OBJ/JSON files with waypoint normals and an offline interactive preview.html.' if valid_visual else ' Generate toolpaths to include path files and the interactive HTML preview.'))
+        export_id=saved_id+(valid_visual[0] if valid_visual else str(first_height))
+        st.write('Export arrays, deformed mesh, and the run report.'+
+                 (' Includes generated layer OBJs, toolpath OBJ/JSON files, and an offline interactive preview.html.' if valid_visual else
+                  ' Includes fixed-count diagnostic layer OBJs.' if count else
+                  ' Generate layers and toolpaths to include physical layers and their preview.'))
         if st.button('Prepare ZIP'):
             with st.spinner('Building archive…'):
-                st.session_state['export'] = (export_id,count,bundle(result,report,count,valid_visual[2:] if valid_visual else None))
+                st.session_state['export'] = (export_id,count,bundle(result,report,count,valid_visual[2:] if valid_visual else None,first_height))
         exported = st.session_state.get('export')
         if exported and exported[:2]==(export_id,count):
             st.download_button('Download experiment',exported[2],'s3_experiment.zip','application/zip')
-        st.caption('Exports use Z-up coordinates. No G-code is produced.')
+        st.caption('Exports use Z-up coordinates.')
+        st.subheader('Cura G-code')
+        if current_cura:
+            st.download_button('Download G-code',current_cura[2],'s3_print.gcode','text/plain',key='cura_download_tab',type='primary')
+            st.download_button('Download original Cura G-code',current_cura[4]['cura_deformed.gcode'],
+                               'cura_deformed.gcode','text/plain')
+            archive=io.BytesIO()
+            with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
+                for name,payload in current_cura[4].items():z.writestr(name,payload)
+            st.download_button('Download Cura project ZIP',archive.getvalue(),'s3_cura.zip','application/zip')
+        else:
+            st.info('Open Cura slicing and click Slice with Cura. Research toolpaths are not required for G-code.')
+    return gcode_sidebar_slot
+
+
+def gcode_download_panel(slot):
+    with slot:
+        st.header('G-code download')
+        payload=st.session_state.get('ready_gcode_download')
+        st.caption(st.session_state.get('gcode_download_status','Click Slice with Cura to create G-code.'))
+        st.download_button('Download G-code',payload or '',file_name='s3_print.gcode',
+                           mime='text/plain',disabled=payload is None,
+                           key='sidebar_gcode_download',type='primary',width='stretch')
 
 
 if __name__ == '__main__':
-    main()
+    gcode_download_panel(main())

@@ -4,24 +4,90 @@ The C++ residual weights are used as residual weights (their squares enter the
 energy). These are deliberately not silently replaced with paper coefficients.
 """
 import numpy as np
+import time
 from scipy import sparse
-from scipy.sparse.linalg import splu
+from scipy.sparse.linalg import splu, cg
 from scipy.spatial.transform import Rotation
 from .mesh import unit
 
 
+class PinnedLeastSquares:
+    """Factor a fixed system once; pinned values and right-hand sides may vary."""
+    def __init__(self,a,anchors,*,progress=None,permc_spec='COLAMD'):
+        self.progress=progress
+        self.anchors=np.asarray(anchors,dtype=int).copy()
+        self.free=np.ones(a.shape[1],dtype=bool)
+        self.free[self.anchors]=False
+        if progress:progress('Eliminating pinned variables')
+        reduced=a[:,self.free].tocsc()
+        self.transpose=reduced.T
+        self.pinned=a[:,self.anchors].copy()
+        self.factor=None
+        if self.free.any():
+            if progress:progress(f'Forming normal matrix · {reduced.shape[1]:,} free unknowns')
+            normal=(self.transpose@reduced).tocsc()
+            normal.eliminate_zeros()
+            if progress:progress(f'Factoring sparse matrix · {normal.shape[0]:,} unknowns · {normal.nnz:,} nonzeros · {permc_spec}')
+            self.factor=splu(normal,permc_spec=permc_spec)
+
+    def solve(self,b,values):
+        if self.progress:self.progress('Solving factored system')
+        rhs=b-self.pinned@values
+        result=np.empty((len(self.free),)+b.shape[1:])
+        result[self.anchors]=values
+        if self.factor is not None:
+            result[self.free]=self.factor.solve(self.transpose@rhs)
+        if not np.isfinite(result).all():
+            raise ValueError('Nonfinite least-squares solution')
+        return result
+
+
 def least_squares_pinned(a, b, anchors, values):
     """Remove translation gauges before solving normal equations."""
-    free = np.ones(a.shape[1], dtype=bool)
-    free[anchors] = False
-    reduced = a[:, free].tocsc()
-    rhs = b - a[:, anchors] @ values
-    result = np.empty((a.shape[1],) + b.shape[1:])
-    result[anchors] = values
-    if free.any():
-        result[free] = splu((reduced.T @ reduced).tocsc()).solve(reduced.T @ rhs)
+    return PinnedLeastSquares(a,anchors).solve(b,values)
+
+
+def iterative_least_squares_pinned(a,b,anchors,values,*,initial=None,progress=None,
+                                   tolerance=1e-9,max_iterations=5000):
+    """Column-scaled CG on pinned normal equations, without LU fill-in.
+
+    Accept only a verified scaled normal residual. Nonconvergence is explicit;
+    do not silently fall back to the potentially expensive direct factorization.
+    """
+    free=np.ones(a.shape[1],dtype=bool); free[anchors]=False
+    result=np.empty(a.shape[1]); result[anchors]=values
+    if not free.any():return result
+    if progress:progress('Preparing iterative system and diagonal preconditioner')
+    reduced=a[:,free].tocsr()
+    rhs=b-a[:,anchors]@values
+    norms=np.sqrt(np.asarray(reduced.power(2).sum(axis=0)).ravel())
+    if np.any(norms<=0) or not np.isfinite(norms).all():
+        raise ValueError('Invalid iterative system column norms')
+    scaled=reduced@sparse.diags(1/norms)
+    normal=(scaled.T@scaled).tocsr(); normal.eliminate_zeros()
+    target=np.asarray(scaled.T@rhs).ravel()
+    target_norm=float(np.linalg.norm(target))
+    limit=tolerance*max(target_norm,1e-30)
+    count=0; last_update=time.perf_counter()
+    def monitor(x):
+        nonlocal count,last_update
+        count+=1
+        if progress and (count==1 or time.perf_counter()-last_update>=.5):
+            residual=np.linalg.norm(normal@x-target)/max(target_norm,1e-30)
+            progress(f'CG iteration {count}/{max_iterations} · relative normal residual {residual:.3g} · target {tolerance:.1g}')
+            last_update=time.perf_counter()
+    if progress:progress(f'Iterative CG · {normal.shape[0]:,} unknowns · {normal.nnz:,} nonzeros')
+    x,info=cg(normal,target,x0=None if initial is None else initial[free]*norms,
+              rtol=tolerance,atol=0.,maxiter=max_iterations,callback=monitor)
+    residual=float(np.linalg.norm(normal@x-target))
+    if info!=0 or not np.isfinite(x).all() or not np.isfinite(residual) or residual>max(limit*2,1e-30):
+        raise ValueError(f'Eq. 12 iterative solve did not converge after {count} iterations '
+                         f'(relative normal residual {residual/max(target_norm,1e-30):.3g}). '
+                         'Try the Direct (LU) Eq. 12 solver or increase scale_max_iterations in the JSON config.')
+    result[free]=x/norms
     if not np.isfinite(result).all():
-        raise ValueError('Nonfinite least-squares solution')
+        raise ValueError('Nonfinite iterative least-squares solution')
+    if progress:progress(f'CG converged · {count} iterations · relative normal residual {residual/max(target_norm,1e-30):.3g}')
     return result
 
 
@@ -62,6 +128,21 @@ def from_two_vectors(a, b):
     q = np.r_[1+d, cross]
     q /= np.linalg.norm(q)
     return Rotation.from_quat(q, scalar_first=True).as_matrix()
+
+
+def from_two_vectors_batch(a,b):
+    """Batched minimal rotations, preserving the scalar antiparallel fallback."""
+    a,b=np.broadcast_arrays(unit(a),unit(b))
+    dots=np.clip(np.einsum('ij,ij->i',a,b),-1,1)
+    opposite=dots < -1+1e-12
+    result=np.empty((len(a),3,3))
+    regular=~opposite
+    if regular.any():
+        q=np.column_stack([1+dots[regular],np.cross(a[regular],b[regular])])
+        result[regular]=Rotation.from_quat(unit(q),scalar_first=True).as_matrix()
+    for i in np.flatnonzero(opposite):
+        result[i]=from_two_vectors(a[i],b[i])
+    return result
 
 
 def fit_rotations(mesh, points):

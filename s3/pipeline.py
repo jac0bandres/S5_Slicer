@@ -5,8 +5,8 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.csgraph import connected_components,dijkstra
 from .mesh import TetMesh, unit
-from .numerics import from_two_vectors
-from .paper import project_printing_direction, blend_quaternions, solve_paper_scales
+from .numerics import from_two_vectors_batch
+from .paper import project_printing_direction, blend_quaternions, solve_paper_scales, QuaternionBlendWorkspace
 
 
 @dataclass(frozen=True)
@@ -31,9 +31,13 @@ class PaperConfig:
     fix_build_plate: bool = True
     base_band: float = 0.
     enforce_build_order: bool = True
+    scale_solver: str = 'auto'
+    scale_tolerance: float = 1e-9
+    scale_max_iterations: int = 5000
 
     def __post_init__(self):
         for name,value in asdict(self).items():
+            if name=='scale_solver':continue
             if not np.isfinite(value):
                 raise ValueError(f'Nonfinite parameter {name}')
         for name in ['alpha','beta','gamma']:
@@ -57,6 +61,13 @@ class PaperConfig:
             raise ValueError('Nozzle cone angle must be in (0,180)')
         if not 0<=self.base_band<1:
             raise ValueError('Build-plate band must be in [0,1)')
+        if self.scale_solver not in ('auto','direct','iterative'):
+            raise ValueError('Invalid Eq. 12 solver')
+        if not 0<self.scale_tolerance<1:
+            raise ValueError('Invalid Eq. 12 tolerance')
+        if (not isinstance(self.scale_max_iterations,int) or isinstance(self.scale_max_iterations,bool)
+                or self.scale_max_iterations<1):
+            raise ValueError('Eq. 12 iteration limit must be a positive integer')
 
 
 def floating_minima(mesh,scalar,base_vertices,edges=None):
@@ -162,15 +173,19 @@ class Objectives:
                                    cfg.weight_sr*self.stress_mask])
         return weights
 
-    def metric(self,scalar):
+    def metric(self,scalar,progress=None):
         # Eq. 13: unweighted sum of spherical geodesic distances in radians.
         directions=unit(self.mesh.gradient(scalar))
         distances=[]
-        for ci in self.active:
+        last_update=time.perf_counter()
+        for completed,ci in enumerate(self.active,1):
             closest,_=self.project(ci,directions[ci])
             # atan2 is stable near zero, unlike arccos(dot).
             distances.append(np.arctan2(np.linalg.norm(np.cross(directions[ci],closest)),
                                        np.clip(directions[ci]@closest,-1,1)))
+            if progress and (completed==len(self.active) or time.perf_counter()-last_update>=.5):
+                progress(f'{completed:,}/{len(self.active):,} active cells')
+                last_update=time.perf_counter()
         return float(np.sum(distances)),float(max(distances,default=0.))
 
 
@@ -206,14 +221,24 @@ def concavity_weights(mesh,scalar,nozzle_angle,exponent):
     return weights,int(collisions.sum())
 
 
-def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_faces=None,callback=None):
+def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_faces=None,callback=None,
+              progress_callback=None):
     """Paper stages 2.3(1–6), including Eq. 13 stopping and raw height transfer.
 
     Uses Z-up as printed in the paper. No implicit Y/Z conversion is performed.
     The iteration cap is a numerical guard and is reported as such, never as
     convergence. Element validity is monitored, not guaranteed by this method.
+    ``callback`` receives completed outer-iteration metrics. Optional
+    ``progress_callback`` receives stage messages and elapsed seconds, including
+    throttled cell counts during projection and objective evaluation.
     """
     cfg=config or PaperConfig()
+    run_started=time.perf_counter()
+    context=''
+    def emit(message):
+        if progress_callback:
+            progress_callback(dict(message=context+message,elapsed_seconds=time.perf_counter()-run_started))
+    emit('Preparing build-plate constraints')
     base_height=float(mesh.points[:,2].min())
     base_tolerance=1e-8*max(1.,float(np.ptp(mesh.points,axis=0).max()))
     if cfg.base_band>0:
@@ -232,7 +257,9 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
         raise ValueError('No flat build-plate contact faces found. Orient the input onto its intended base, '
                          'raise the build-plate pin band to anchor the lowest surface, or disable fixed build plate '
                          'for an unconstrained experiment.')
+    emit('Preparing fabrication objectives')
     problem=Objectives(mesh,cfg,stress=stress,stress_mask=stress_mask,sq_faces=sq_faces,sf_faces=sf_faces)
+    emit(f'Checking mesh connectivity · {len(problem.active):,} active cells')
     points=mesh.points.copy(); points[:,2]-=points[:,2].min()
     edges=np.unique(np.sort(np.concatenate([mesh.cells[:,[i,j]] for i in range(4)
                                            for j in range(i+1,4)]),axis=1),axis=0)
@@ -242,16 +269,22 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
                          'build-order enforcement to experiment on organic models (some regions may then need support).')
     guide=None
     if cfg.fix_build_plate:
+        emit('Computing build-plate distance guide')
         lengths=np.linalg.norm(mesh.points[edges[:,0]]-mesh.points[edges[:,1]],axis=1)
         graph=sparse.coo_matrix((np.r_[lengths,lengths],(edges.T.ravel(),edges[:,::-1].T.ravel())),
                                shape=(len(points),len(points))).tocsr()
         distance=dijkstra(graph,indices=base_vertices,min_only=True)
         guide=mesh.gradient(distance)
+    emit('Preparing deformation frames')
     p0=mesh.points[mesh.cells]; p0-=p0.mean(axis=1,keepdims=True)
     pinv=np.linalg.pinv(p0)
     history=[]; rotations=np.tile(np.eye(3),(len(mesh.cells),1,1))
+    blend_workspace=QuaternionBlendWorkspace()
     scales=np.ones((len(mesh.cells),3))
-    previous,_=problem.metric(points[:,2])
+    emit('Evaluating initial objective (Eq. 13)')
+    previous,_=problem.metric(points[:,2],
+        (lambda counts: emit('Evaluating initial objective (Eq. 13) · '+counts)) if progress_callback else None)
+    emit(f'Initial objective Π {previous:.5g}')
     initial_metric=previous
     reason='iteration_limit'
     if previous<=cfg.objective_tolerance:
@@ -259,6 +292,8 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
     else:
         for outer in range(cfg.max_outer_iterations):
             started=time.perf_counter()
+            context=f'Outer {outer+1}/{cfg.max_outer_iterations} · '
+            emit('Fitting rotations and updating weights')
             current=points[mesh.cells];current-=current.mean(axis=1,keepdims=True)
             f=(pinv@current).transpose(0,2,1)
             u,_,vt=np.linalg.svd(f)
@@ -270,23 +305,43 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
             else:
                 edge_weights=np.ones(len(mesh.neighbor_pairs));collisions=0
             for inner in range(cfg.inner_iterations):
+                context=f'Outer {outer+1}/{cfg.max_outer_iterations} · Inner {inner+1}/{cfg.inner_iterations} · '
+                emit(f'Projecting fabrication constraints (Eq. 7) · 0/{len(problem.active):,} active cells')
+                last_update=time.perf_counter()
                 targets=rotations.copy();conformal=np.zeros(len(mesh.cells),dtype=bool)
-                for ci in problem.active:
-                    d=rotations[ci].T@np.array([0.,0.,1.])
+                projected=np.empty((len(problem.active),3))
+                for completed,ci in enumerate(problem.active,1):
+                    d=rotations[ci,2,:]
                     closest,conformal[ci]=problem.project(ci,d,preferred=guide[ci] if guide is not None else None)
-                    targets[ci]=from_two_vectors(rotations[ci]@closest,np.array([0.,0.,1.]))@rotations[ci]
+                    projected[completed-1]=closest
+                    if progress_callback and (completed==len(problem.active) or time.perf_counter()-last_update>=.5):
+                        emit(f'Projecting fabrication constraints (Eq. 7) · {completed:,}/{len(problem.active):,} active cells')
+                        last_update=time.perf_counter()
+                if len(problem.active):
+                    active_rotations=rotations[problem.active]
+                    world=np.einsum('cij,cj->ci',active_rotations,projected)
+                    targets[problem.active]=from_two_vectors_batch(world,np.array([0.,0.,1.]))@active_rotations
                 inner_keep=keep.copy()
                 # §3.3.1's final local/global step strengthens SQ-C targets.
                 if inner==cfg.inner_iterations-1:
                     inner_keep[conformal]=np.maximum(inner_keep[conformal],cfg.final_conformal_weight)
+                emit('Blending rotations (Eq. 8) · solving sparse system; reusing factorization when unchanged')
                 rotations=blend_quaternions(mesh,rotations,targets,inner_keep,edge_weights,
-                    fixed_identity=base_cells if cfg.fix_build_plate else None)
+                    fixed_identity=base_cells if cfg.fix_build_plate else None,workspace=blend_workspace)
+            context=f'Outer {outer+1}/{cfg.max_outer_iterations} · '
+            emit('Solving deformation and scales (Eq. 12)')
+            initial_points=points.copy()
+            initial_points[:,2]+=base_height if cfg.fix_build_plate else 0.
             proposed,proposed_scales=solve_paper_scales(mesh,rotations,cfg.rigidity,cfg.scale_compatibility,
-                                           fixed_vertices=base_vertices if cfg.fix_build_plate else None)
+                                           fixed_vertices=base_vertices if cfg.fix_build_plate else None,
+                                           progress=(lambda message: emit('Eq. 12 · '+message)) if progress_callback else None,
+                                           solver=cfg.scale_solver,initial=np.r_[initial_points.ravel(),scales.ravel()],
+                                           tolerance=cfg.scale_tolerance,max_iterations=cfg.scale_max_iterations)
             proposed[:,2]-=base_height if cfg.fix_build_plate else proposed[:,2].min()
             step=1.
             if cfg.fix_build_plate:
                 for attempt in range(25):
+                    emit(f'Checking build feasibility · attempt {attempt+1}/25 · step {step:.5g}')
                     candidate=points+step*(proposed-points)
                     determinant=np.linalg.det(np.einsum('cij,cik->ckj',mesh.grad_basis,candidate[mesh.cells]))
                     if (determinant.min()>1e-6 and candidate[:,2].min()>=-base_tolerance
@@ -300,7 +355,9 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
                 points=candidate
                 scales=scales+step*(proposed_scales-scales)
             else:points,scales=proposed,proposed_scales
-            metric,worst=problem.metric(points[:,2])
+            emit('Evaluating objective (Eq. 13)')
+            metric,worst=problem.metric(points[:,2],
+                (lambda counts: emit('Evaluating objective (Eq. 13) · '+counts)) if progress_callback else None)
             f=np.einsum('cij,cik->ckj',mesh.grad_basis,points[mesh.cells])
             det=np.linalg.det(f)
             relative=abs(previous-metric)/max(previous,cfg.objective_tolerance,1e-15)
@@ -315,6 +372,8 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
             if relative<cfg.relative_tolerance:
                 reason='relative_stagnation';break
             previous=metric
+    context=''
+    emit('Finalizing height field and checking build connectivity')
     scalar=points[:,2].copy()
     build=dict(fixed=cfg.fix_build_plate,base_vertices=base_vertices.tolist(),
                base_scalar_span=float(np.ptp(scalar[base_vertices])) if len(base_vertices) else None,
@@ -322,6 +381,7 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
                below_plate_vertices=int((scalar < -base_tolerance).sum()),
                floating_minimum_vertices=floating_minima(mesh,scalar,base_vertices,edges),
                minimum_scalar=float(scalar.min()))
+    emit(f'Finished · {reason} · {len(history)} outer iterations')
     return dict(points=mesh.points.copy(),cells=mesh.cells.copy(),deformed=points,
                 scalar=scalar,rotations=rotations,scales=scales,history=history,
                 initial_pi=initial_metric,stop_reason=reason,config=asdict(cfg),build_plate=build)

@@ -11,7 +11,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import splu
 from scipy.spatial.transform import Rotation
 from .mesh import unit
-from .numerics import from_two_vectors, least_squares_pinned
+from .numerics import PinnedLeastSquares, iterative_least_squares_pinned
 
 
 def project_sphere_halfspaces(direction, a, b, tol=1e-10,*,preferred=None):
@@ -34,6 +34,11 @@ def project_sphere_halfspaces(direction, a, b, tol=1e-10,*,preferred=None):
     a,b = a/lengths[:,None],b/lengths
     if np.any(b > 1+tol):
         raise ValueError('Empty spherical feasible region')
+    slack=a@d-b
+    # Preserve the preferred-direction tie break near constraint boundaries.
+    # Candidates within score tolerance are at most sqrt(2*tol) from d.
+    if np.all(slack>=-tol) and (preferred is None or np.all(slack>np.sqrt(2*tol)+tol)):
+        return d
     candidates = [d]
     for n,c in zip(a,b):
         if abs(c)>1+tol:
@@ -105,7 +110,44 @@ def project_printing_direction(direction, *, sf_normals=(), stress=None, sq_norm
     return max(candidates,key=lambda item: item[0]@d)
 
 
-def blend_quaternions(mesh, rotations, targets, keep_weights, edge_weights,*,fixed_identity=None):
+class QuaternionBlendWorkspace:
+    """One-entry Eq. 8 cache, owned by a single run on an immutable mesh.
+
+    Rebuild for any weight or fixed-cell change, including final SQ-C weights.
+    Quaternion signs and anchor values remain dynamic on every solve.
+    """
+    def __init__(self):
+        self.mesh=None
+
+    def prepare(self,mesh,keep_weights,edge_weights,fixed):
+        if (self.mesh is mesh and np.array_equal(self.keep,keep_weights)
+                and np.array_equal(self.edges,edge_weights) and np.array_equal(self.fixed,fixed)):
+            return
+        m=len(mesh.cells); pairs=mesh.neighbor_pairs
+        ids=np.flatnonzero(keep_weights>0)
+        rows=np.r_[np.repeat(np.arange(len(pairs)),2),len(pairs)+np.arange(len(ids))]
+        cols=np.r_[pairs.ravel(),ids]
+        vals=np.r_[np.repeat(np.sqrt(edge_weights),2)*np.tile([1,-1],len(pairs)),
+                   np.sqrt(keep_weights[ids])]
+        a=sparse.coo_matrix((vals,(rows,cols)),shape=(len(pairs)+len(ids),m)).tocsr()
+        # Unconstrained components have a constant-quaternion minimizer. Preserve
+        # their current root orientation rather than solving singular equations.
+        graph=sparse.coo_matrix((np.ones(len(pairs)*2),
+                                (np.r_[pairs[:,0],pairs[:,1]],np.r_[pairs[:,1],pairs[:,0]])),shape=(m,m))
+        count,labels=connected_components(graph)
+        anchors=[]
+        for c in range(count):
+            indices=np.flatnonzero(labels==c)
+            if not np.any(keep_weights[indices]>0) and not np.isin(indices,fixed).any(): anchors.append(indices[0])
+        anchors=np.r_[np.array(anchors,dtype=int),fixed]
+        solver=PinnedLeastSquares(a,anchors)
+        self.mesh=mesh
+        self.keep=keep_weights.copy(); self.edges=edge_weights.copy(); self.fixed=fixed.copy()
+        self.ids=ids; self.anchors=anchors; self.solver=solver; self.rows=a.shape[0]
+
+
+def blend_quaternions(mesh, rotations, targets, keep_weights, edge_weights,*,fixed_identity=None,
+                      workspace=None):
     """Eq. 8, pairwise incidence energy, with normalized quaternion output.
 
     Targets use the same hemisphere as the current rotations; all initial
@@ -129,29 +171,16 @@ def blend_quaternions(mesh, rotations, targets, keep_weights, edge_weights,*,fix
     edge_weights=np.asarray(edge_weights,dtype=float)
     if np.any(keep_weights<0) or np.any(edge_weights<=0):
         raise ValueError('Invalid energy weights')
-    ids=np.flatnonzero(keep_weights>0)
-    rows=np.r_[np.repeat(np.arange(len(pairs)),2),len(pairs)+np.arange(len(ids))]
-    cols=np.r_[pairs.ravel(),ids]
-    vals=np.r_[np.repeat(np.sqrt(edge_weights),2)*np.tile([1,-1],len(pairs)),
-               np.sqrt(keep_weights[ids])]
-    a=sparse.coo_matrix((vals,(rows,cols)),shape=(len(pairs)+len(ids),m)).tocsr()
-    rhs=np.zeros((a.shape[0],4)); rhs[len(pairs):]=np.sqrt(keep_weights[ids,None])*qt[ids]
-    # Unconstrained components have a constant-quaternion minimizer. Preserve
-    # their current root orientation rather than solving singular equations.
-    graph=sparse.coo_matrix((np.ones(len(pairs)*2),
-                            (np.r_[pairs[:,0],pairs[:,1]],np.r_[pairs[:,1],pairs[:,0]])),shape=(m,m))
-    count,labels=connected_components(graph)
     fixed=np.asarray([] if fixed_identity is None else fixed_identity,dtype=int)
-    anchors=[]
-    for c in range(count):
-        indices=np.flatnonzero(labels==c)
-        if not np.any(keep_weights[indices]>0) and not np.isin(indices,fixed).any(): anchors.append(indices[0])
-    anchors=np.r_[np.array(anchors,dtype=int),fixed]
+    workspace=workspace if workspace is not None else QuaternionBlendWorkspace()
+    workspace.prepare(mesh,keep_weights,edge_weights,fixed)
+    ids,anchors=workspace.ids,workspace.anchors
+    rhs=np.zeros((workspace.rows,4)); rhs[len(pairs):]=np.sqrt(keep_weights[ids,None])*qt[ids]
     values=q[anchors].copy()
     if len(fixed):
         values[-len(fixed):]=0
         values[-len(fixed):,0]=np.where(q[fixed,0]<0,-1.,1.)
-    solved=least_squares_pinned(a,rhs,anchors,values)
+    solved=workspace.solver.solve(rhs,values)
     return Rotation.from_quat(unit(solved),scalar_first=True).as_matrix()
 
 
@@ -191,7 +220,11 @@ def paper_scale_system(mesh, rotations, rigidity=1., compatibility=6.):
     return a,b
 
 
-def solve_paper_scales(mesh,rotations,rigidity=1.,compatibility=6.,*,fixed_vertices=None):
+def solve_paper_scales(mesh,rotations,rigidity=1.,compatibility=6.,*,fixed_vertices=None,progress=None,
+                       solver='auto',initial=None,tolerance=1e-9,max_iterations=5000):
+    if solver not in ('auto','direct','iterative'):
+        raise ValueError('Unknown Eq. 12 solver')
+    if progress:progress('Assembling deformation matrix')
     a,b=paper_scale_system(mesh,rotations,rigidity,compatibility)
     vertices=mesh.anchors
     if fixed_vertices is not None:
@@ -201,6 +234,13 @@ def solve_paper_scales(mesh,rotations,rigidity=1.,compatibility=6.,*,fixed_verti
         vertices=np.union1d(gauges,fixed_vertices)
     anchors=(3*vertices[:,None]+np.arange(3)).ravel()
     values=mesh.points[vertices].ravel()
-    x=least_squares_pinned(a,b,anchors,values)
+    method=('iterative' if a.shape[1]-len(anchors)>=10000 else 'direct') if solver=='auto' else solver
+    if progress:progress(f'Using {method} solver')
+    if method=='iterative':
+        if initial is None:initial=np.r_[mesh.points.ravel(),np.ones(3*len(mesh.cells))]
+        x=iterative_least_squares_pinned(a,b,anchors,values,initial=initial,progress=progress,
+                                       tolerance=tolerance,max_iterations=max_iterations)
+    else:
+        x=PinnedLeastSquares(a,anchors,progress=progress).solve(b,values)
     n=len(mesh.points)
     return x[:3*n].reshape(-1,3),x[3*n:].reshape(-1,3)

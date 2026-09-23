@@ -1,0 +1,3 @@
+-r requirements.txt
+# VTK tetrahedral containment/closest-cell lookup, as used by S4/S5.
+pyvista>=0.46,<0.48

@@ -4,3 +4,9 @@ plotly>=6,<8
 # STL/OBJ/PLY surface upload -> tetrahedral mesh (TetGen).
 tetgen>=0.6
 trimesh>=4
+
+# Cura deform/reform tetrahedral point lookup.
+-r requirements-cura.txt
+
+# Automatic surface repair for STL/OBJ/PLY uploads (holes, self-intersections).
+-r requirements-repair.txt

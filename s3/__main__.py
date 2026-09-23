@@ -14,6 +14,7 @@ from .pipeline import PaperConfig, run_paper
 from .layers import write_layers
 from .adaptive import AdaptiveConfig
 from .toolpaths import ToolpathConfig
+from .cura import CuraConfig, slice_with_cura
 from .visual_pipeline import build_visualization,write_visualization
 
 
@@ -29,19 +30,42 @@ def main():
     parser.add_argument('--toolpaths',action='store_true',help='Generate surface deposition strokes (defaults to 12 layers)')
     parser.add_argument('--layer-mode',choices=['fixed','adaptive'],default='fixed')
     parser.add_argument('--min-thickness',type=float,default=.16)
+    parser.add_argument('--first-layer-height',type=float,default=.2,help='Maximum first-layer distance above Z=0 in mm')
     parser.add_argument('--max-thickness',type=float,default=.4)
     parser.add_argument('--path-mode',choices=['contour','hybrid'],default='contour')
     parser.add_argument('--path-spacing',type=float,default=.4)
     parser.add_argument('--waypoint-distance',type=float,default=.4)
     parser.add_argument('--preview-html',action='store_true',help='Export offline interactive preview (requires plotly)')
+    parser.add_argument('--gcode', action='store_true', help='Slice the S3-deformed model with Cura and reform its G-code to S5 X/Z/B/C')
+    parser.add_argument('--gcode-config', type=Path, help='JSON overrides for cura.CuraConfig')
+    parser.add_argument('--start-gcode', type=Path, help='Replace default heating/homing with this file')
+    parser.add_argument('--end-gcode', type=Path, help='Replace default heater-off shutdown with this file')
+    parser.add_argument('--cura',help='CuraEngine executable')
+    parser.add_argument('--cura-profile',help='Cura settings JSON (existing S4/S5 profile or flat settings)')
+    parser.add_argument('--layer-height',type=float,help='Cura layer height in deformed space (mm)')
+    parser.add_argument('--line-width',type=float,help='Cura extrusion line width (mm)')
+    parser.add_argument('--infill-density',type=float,help='Cura infill percentage')
     args = parser.parse_args()
+    if any((args.gcode_config, args.start_gcode, args.end_gcode)) and not args.gcode:
+        parser.error('G-code configuration and scripts require --gcode')
+    cura_values=json.loads(args.gcode_config.read_text()) if args.gcode_config else {}
+    for name,value in dict(engine=args.cura,profile=args.cura_profile,layer_height=args.layer_height,
+                           line_width=args.line_width,infill_density=args.infill_density).items():
+        if value is not None:cura_values[name]=value
+    cura_values.setdefault('first_layer_height',args.first_layer_height)
+    gcode_cfg = CuraConfig(**cura_values)
+    if args.gcode and args.implementation!='paper':parser.error('Cura reformation uses the Z-up paper pipeline')
+    start_gcode = args.start_gcode.read_text() if args.start_gcode else None
+    end_gcode = args.end_gcode.read_text() if args.end_gcode else None
     if args.layers<0: parser.error('Layer count must be nonnegative')
     if (args.preview_html or args.layer_mode=='adaptive') and not args.toolpaths:
         parser.error('--preview-html and adaptive layer mode require --toolpaths')
     if args.toolpaths and args.implementation!='paper':
         parser.error('Surface toolpaths currently use the Z-up paper pipeline')
     path_cfg=ToolpathConfig(spacing=args.path_spacing,waypoint_distance=args.waypoint_distance,mode=args.path_mode)
-    adaptive=AdaptiveConfig(minimum=args.min_thickness,maximum=args.max_thickness,
+    first_height=args.first_layer_height
+    if not np.isfinite(first_height) or first_height<=0:parser.error('First-layer height must be finite and positive')
+    adaptive=AdaptiveConfig(minimum=args.min_thickness,maximum=args.max_thickness,first_layer_height=first_height,
                             tolerance=min(.005,args.min_thickness/10)) if args.layer_mode=='adaptive' else None
     if args.preview_html:
         try:import plotly
@@ -70,10 +94,19 @@ def main():
     result = runner(mesh,cfg,**objectives,callback=lambda row: print(json.dumps(row),flush=True))
     visual=None
     if args.toolpaths:
-        visual=build_visualization(result,count=args.layers or 12,adaptive=adaptive,toolpath_config=path_cfg,
+        visual=build_visualization(result,count=args.layers or 12,adaptive=adaptive,toolpath_config=path_cfg,first_layer_height=first_height,
             stress=objectives.get('stress'),stress_mask=objectives.get('stress_mask'),
             callback=lambda row:print(json.dumps(row),flush=True))
+    gcode_report = None
     args.output.mkdir(parents=True,exist_ok=True)
+    if args.gcode:
+        settings={}
+        if start_gcode is not None:settings['machine_start_gcode']=start_gcode
+        if end_gcode is not None:settings['machine_end_gcode']=end_gcode
+        try:
+            _,gcode_report=slice_with_cura(result,args.output,gcode_cfg,settings=settings,callback=print)
+        except (ValueError,RuntimeError) as exc:
+            parser.error(f'Cura deform/reform: {exc}')
     np.savez_compressed(args.output/'result.npz',**{k:v for k,v in result.items() if isinstance(v,np.ndarray)})
     write_tet(args.output/'deformed.tet',result['deformed'],result['cells'])
     manifest = []
@@ -81,9 +114,11 @@ def main():
         manifest=write_visualization(args.output,result,*visual,html=args.preview_html)
     elif args.layers:
         mesh = TetMesh(result['points'],result['cells'])
-        manifest = write_layers(mesh,result['scalar'],args.layers,args.output/'layers')
-    report = dict(status='deformation/layers/toolpaths for visual inspection' if visual else 'deformation/scalar stages',
-                  print_ready=False,visualization=visual[2] if visual else None,
+        manifest = write_layers(mesh,result['scalar'],args.layers,args.output/'layers',
+                                first_layer_height=first_height if args.implementation=='paper' else None)
+    report = dict(status='S3 deformation / Cura slicing / S4-S5 reformation' if args.gcode else
+                  'deformation/layers/toolpaths for visual inspection' if visual else 'deformation/scalar stages',
+                  print_ready=False,gcode=gcode_report,visualization=visual[2] if visual else None,
                   build_plate=result.get('build_plate'),
                   implementation=args.implementation,input_up_axis=args.up_axis,output_up_axis=target_up,
                   source_commit='a77ef04115b1383a58f228a7f67ce4434c9d09f3',

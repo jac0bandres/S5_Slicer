@@ -4,27 +4,22 @@ from pathlib import Path
 import json
 import numpy as np
 from .adaptive import AdaptiveConfig,adaptive_layers
-from .layers import isosurface
+from .layers import isosurface,fixed_layers
 from .mesh import TetMesh
 from .surface import Surface
 from .toolpaths import ToolpathConfig,generate_toolpaths
 
 
 def build_visualization(result,*,count=12,adaptive=None,toolpath_config=None,
-                        stress=None,stress_mask=None,callback=None):
+                        stress=None,stress_mask=None,callback=None,first_layer_height=.2):
     mesh=TetMesh(result['points'],result['cells'])
     if adaptive is not None:
         layers,layer_report=adaptive_layers(mesh,result['scalar'],adaptive,callback)
         layer_report.update(mode='adaptive',config=asdict(adaptive))
     else:
-        if not isinstance(count,int) or count<1:raise ValueError('Layer count must be positive')
-        scalar=result['scalar'];span=float(np.ptp(scalar))
-        if not np.isfinite(scalar).all() or span<=0:raise ValueError('Invalid layer scalar field')
-        layers=[]
-        for level in scalar.min()+(np.arange(count)+.5)*span/count:
-            points,faces,cells=isosurface(mesh,scalar.copy(),float(level),return_cell_ids=True)
-            if len(faces):layers.append(Surface(points,faces,float(level),cell_ids=cells))
-        layer_report=dict(mode='fixed',requested_count=count,delivered_count=len(layers),coverage_certified=False)
+        layers,bed_report=fixed_layers(mesh,result['scalar'],count,first_layer_height)
+        layer_report=dict(mode='fixed',requested_count=count,delivered_count=len(layers),
+                          first_layer=bed_report,coverage_certified=False)
     if not layers:raise ValueError('No curved layers intersect the model at the requested levels')
     cfg=toolpath_config or ToolpathConfig()
     paths=[];reports=[]

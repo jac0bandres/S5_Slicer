@@ -33,9 +33,11 @@ class S5Machine:
         position[2] = z-self.nozzle_offset*(np.cos(b)-1)
         return position, direction
 
-    def inverse(self, position, direction, previous_c=0.):
+    def inverse(self, position, direction, previous_c=0., *, strict=True):
         """Exact radial-plane inverse; raise for unavailable nozzle orientations.
 
+        With strict=False, project direction onto the radial plane and emit B
+        without clipping or enforcing B limits. Tip position is preserved.
         C is unwrapped near previous_c. At the polar origin, the direction sets
         yaw; an axial direction preserves the previous yaw. No angle clipping.
         """
@@ -55,10 +57,10 @@ class S5Machine:
             b=np.arctan2(n@radial,n[2])
             reconstructed=np.sin(b)*radial+[0,0,np.cos(b)]
             error=np.rad2deg(np.arctan2(np.linalg.norm(np.cross(n,reconstructed)), n@reconstructed))
-            if error>self.angular_tolerance:
+            if strict and error>self.angular_tolerance:
                 continue
             bdeg=np.rad2deg(b)
-            if not self.minimum_b<=bdeg<=self.maximum_b:
+            if strict and not self.minimum_b<=bdeg<=self.maximum_b:
                 continue
             cdeg=previous_c+(np.rad2deg(c)-previous_c+180)%360-180
             return np.array([r-self.nozzle_offset*np.sin(b),

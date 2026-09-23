@@ -6,7 +6,7 @@ thickness guarantee from vertex samples alone.
 """
 from dataclasses import dataclass
 import numpy as np
-from .layers import isosurface
+from .layers import isosurface,first_bed_layer
 from .surface import Surface,separation_bounds,triangle_distance_bounds,subdivide,conform_surface
 
 
@@ -18,10 +18,13 @@ class AdaptiveConfig:
     max_layers: int=2000
     max_refinements: int=2000
     trim_depth: int=6
+    first_layer_height: float | None=None
 
     def __post_init__(self):
         if not (0<self.tolerance<self.minimum<self.maximum):
             raise ValueError('Require 0 < tolerance < minimum < maximum')
+        if self.first_layer_height is not None and (not np.isfinite(self.first_layer_height) or self.first_layer_height<=0):
+            raise ValueError('First-layer height must be finite and positive')
         if self.max_layers<2 or self.max_refinements<0 or self.trim_depth<0:
             raise ValueError('Invalid adaptive budgets')
 
@@ -78,12 +81,10 @@ def adaptive_layers(mesh,scalar,config=None,callback=None):
     field=np.asarray(scalar,dtype=float)
     if field.shape!=(len(mesh.points),) or not np.isfinite(field).all():
         raise ValueError('Invalid scalar field')
-    # Raw deformed height is shifted to zero, as required by L0: G=d_min.
+    # Shift scalar origin; first-layer selection uses physical bed distance.
     field=field-field.min()
     upper=float(field.max())
-    if upper<=cfg.minimum:raise ValueError('Scalar range is smaller than the first layer value')
-    first=_surface(mesh,field,cfg.minimum)
-    if first is None:raise ValueError('The initial level has no surface')
+    first,bed_report=first_bed_layer(mesh,field,cfg.first_layer_height if cfg.first_layer_height is not None else cfg.minimum)
     layers=[first];history=[]
     gradient_scale=float(np.linalg.norm(mesh.gradient(field),axis=1).max())
     delta=max(cfg.minimum*gradient_scale,upper*1e-8)
@@ -144,5 +145,5 @@ def adaptive_layers(mesh,scalar,config=None,callback=None):
                         trim_history=history,distance_checks=checks,
                         spacing_passed=all(c['minimum_ok'] and c['maximum_ok'] for c in checks),
                         coverage_certified=False,
-                        first_layer_level=cfg.minimum,last_layer_level=trimmed[-1].level,
+                        first_layer=bed_report,first_layer_level=first.level,last_layer_level=trimmed[-1].level,
                         remaining_scalar_range=upper-trimmed[-1].level)

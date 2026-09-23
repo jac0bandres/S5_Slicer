@@ -1,0 +1,171 @@
+"""S3 deposition strokes to the existing S5 Core-R-Theta G-code dialect.
+
+Export projects normals onto the radial plane by default; exact orientation
+and B-limit enforcement are opt-in. Interpolated motion is not certified. Bead height is a caller-supplied physical thickness, not a
+scalar-level difference. Coordinates are already in the machine's bed frame.
+"""
+from dataclasses import asdict, dataclass
+from pathlib import Path
+import numpy as np
+from .machine import S5Machine
+
+
+@dataclass(frozen=True)
+class GCodeConfig:
+    enforce_machine_limits: bool = False
+    line_width: float = .4
+    layer_height: float = .2
+    filament_diameter: float = 1.75
+    flow_multiplier: float = 1.
+    print_speed: float = 20.  # mm/s
+    travel_speed: float = 60.  # mm/s, also bounds linear actuator speed
+    rotary_speed: float = 30.  # degrees/s per rotary axis
+    retract_length: float = 1.
+    retract_speed: float = 25.  # filament mm/s
+    travel_clearance: float = 2.
+    nozzle_temperature: float = 240.
+    bed_temperature: float = 55.
+
+    def __post_init__(self):
+        if not isinstance(self.enforce_machine_limits, bool):
+            raise ValueError('enforce_machine_limits must be a boolean')
+        for name, value in asdict(self).items():
+            if name == 'enforce_machine_limits':
+                continue
+            if not np.isfinite(value) or value < 0 or (
+                    value == 0 and name not in ('retract_length', 'nozzle_temperature', 'bed_temperature')):
+                raise ValueError(f'{name} must be finite and {"nonnegative" if name in ("retract_length", "nozzle_temperature", "bed_temperature") else "positive"}')
+
+
+def render_gcode(paths, config=None, *, machine=None, start_gcode=None, end_gcode=None):
+    """Return (text, report) from a sequence of layers of Toolpath objects.
+
+    Preserves layer/stroke order and closes closed strokes if necessary. All
+    geometry is validated before any output is returned. Custom startup replaces
+    heating/homing; it must establish homed absolute machine axes. Motion/extrusion
+    modes are reasserted after it. Custom shutdown replaces the heater-off block.
+    No implicit centering or base translation is performed. Normals are projected
+    onto the radial plane unless enforce_machine_limits is enabled.
+    """
+    cfg = config or GCodeConfig()
+    machine = machine or S5Machine()
+    strokes = []
+    previous_c = 0.
+    max_orientation_error = 0.
+    orientation_mismatches = outside_b_limits = 0.
+    for li, curves in enumerate(paths):
+        for ci, curve in enumerate(curves):
+            label = f'Layer {li + 1}, stroke {ci + 1}'
+            points = np.asarray(curve.points, dtype=float)
+            normals = np.asarray(curve.normals, dtype=float)
+            if (points.ndim != 2 or points.shape[1:] != (3,) or len(points) < 2
+                    or normals.shape != points.shape or not np.isfinite(points).all()
+                    or not np.isfinite(normals).all()):
+                raise ValueError(f'{label}: expected at least two finite points and matching normals')
+            if curve.closed and not np.array_equal(points[-1], points[0]):
+                points = np.vstack([points, points[0]])
+                normals = np.vstack([normals, normals[0]])
+            poses = []
+            for wi, (point, normal) in enumerate(zip(points, normals)):
+                try:
+                    pose = machine.inverse(point, normal, previous_c=previous_c, strict=cfg.enforce_machine_limits)
+                except ValueError as exc:
+                    raise ValueError(f'{label}, waypoint {wi + 1}: {exc}') from exc
+                _, actual_normal = machine.forward(pose)
+                requested_normal = normal / np.linalg.norm(normal)
+                error = float(np.rad2deg(np.arctan2(np.linalg.norm(np.cross(requested_normal, actual_normal)),
+                                                   requested_normal @ actual_normal)))
+                max_orientation_error = max(max_orientation_error, error)
+                orientation_mismatches += int(error > machine.angular_tolerance)
+                outside_b_limits += int(not machine.minimum_b <= pose[2] <= machine.maximum_b)
+                poses.append(pose)
+                previous_c = pose[3]
+            if np.linalg.norm(np.diff(points, axis=0), axis=1).sum() <= 1e-12:
+                raise ValueError(f'{label}: stroke has no deposition length')
+            strokes.append((li, ci, points, np.asarray(poses)))
+    if not strokes:
+        raise ValueError('No deposition strokes to export')
+    first_layer=strokes[0][0]
+    first_max_z=max(float(s[2][:,2].max()) for s in strokes if s[0]==first_layer)
+
+    # At any B, tip Z >= actuator Z for this machine. Traverse at a fixed
+    # actuator height above the entire input path, including during B changes.
+    clearance = max(float(s[2][:, 2].max()) for s in strokes) + cfg.travel_clearance
+    out = ['; Generated by S3 for S5 Core-R-Theta',
+           ('; Exact orientation and B limits enforced' if cfg.enforce_machine_limits else
+            '; Normals projected onto radial plane; B limits not enforced'),
+           f'; Bead width {cfg.line_width:g} mm; supplied bead height {cfg.layer_height:g} mm',
+           'G21', 'G90', 'G94', 'M83']
+    if start_gcode is not None:
+        out.append(start_gcode.rstrip())
+    else:
+        if cfg.bed_temperature:
+            out.extend([f'M140 S{cfg.bed_temperature:g}', f'M190 S{cfg.bed_temperature:g}'])
+        if cfg.nozzle_temperature:
+            out.extend([f'M104 S{cfg.nozzle_temperature:g}', f'M109 S{cfg.nozzle_temperature:g}'])
+        out.append('G28 ; home')
+    out.extend(['G21', 'G90', 'M83', 'G94',
+                f'G1 Z{clearance:.5f} F{cfg.travel_speed * 60:.5f} ; initial lift',
+                f'G1 X0 B0 C0 F{min(cfg.travel_speed, cfg.rotary_speed) * 60:.5f} ; initial pose', 'G93'])
+    previous = np.array([0., clearance, 0., 0.])
+    total_length = total_filament = motion_seconds = 0.
+    factor = cfg.line_width * cfg.layer_height * cfg.flow_multiplier / (np.pi * (cfg.filament_diameter / 2) ** 2)
+
+    def move(pose, *, length=0., extrusion=None):
+        nonlocal previous, motion_seconds
+        delta = np.abs(pose - previous)
+        seconds = max(length / cfg.print_speed,
+                      float(delta[:2].max()) / cfg.travel_speed,
+                      float(delta[2:].max()) / cfg.rotary_speed)
+        if seconds <= 1e-12:
+            return
+        words = ' '.join(f'{axis}{value:.5f}' for axis, value in zip('XZBC', pose))
+        if extrusion is not None and extrusion > 0:
+            words += f' E{extrusion:.8f}'
+        out.append(f'G1 {words} F{60 / seconds:.8f}')
+        motion_seconds += seconds
+        previous = pose.copy()
+
+    def retract(sign):
+        if cfg.retract_length:
+            out.extend(['G94', f'G1 E{sign * cfg.retract_length:.5f} F{cfg.retract_speed * 60:.5f}', 'G93'])
+
+    for index, (li, ci, points, poses) in enumerate(strokes):
+        out.append(f';LAYER:{li} STROKE:{ci}')
+        if index:
+            retract(-1)
+        lifted = previous.copy(); lifted[1] = clearance
+        move(lifted)
+        target = poses[0].copy(); target[1] = clearance
+        move(target)
+        move(poses[0])
+        if index:
+            retract(1)
+        for wi in range(1, len(points)):
+            length = float(np.linalg.norm(points[wi] - points[wi - 1]))
+            extrusion = length * factor
+            move(poses[wi], length=length, extrusion=extrusion)
+            total_length += length
+            total_filament += extrusion
+    retract(-1)
+    lifted = previous.copy(); lifted[1] = clearance
+    move(lifted)
+    out.append('G94')
+    out.append(end_gcode.rstrip() if end_gcode is not None else 'M104 S0\nM140 S0')
+    report = dict(dialect='s5-core-r-theta', config=asdict(cfg), machine=asdict(machine),
+                  strokes=len(strokes), first_layer_maximum_z=first_max_z, deposition_length=total_length,
+                  deposited_filament=total_filament, timed_motion_seconds=motion_seconds,
+                  travel_actuator_z=clearance, print_ready=False,
+                  collision_checked=False, interpolation_checked=False,
+                  machine_limits_enforced=cfg.enforce_machine_limits,
+                  orientation_mismatch_waypoints=orientation_mismatches,
+                  maximum_orientation_error_degrees=max_orientation_error,
+                  outside_b_limits_waypoints=outside_b_limits)
+    return '\n'.join(out) + '\n', report
+
+
+def write_gcode(path, paths, config=None, **kwargs):
+    """Validate and render fully before opening the destination file."""
+    text, report = render_gcode(paths, config, **kwargs)
+    Path(path).write_text(text)
+    return report
