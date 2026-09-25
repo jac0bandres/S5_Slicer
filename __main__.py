@@ -45,12 +45,15 @@ def main():
     parser.add_argument('--layer-height',type=float,help='Cura layer height in deformed space (mm)')
     parser.add_argument('--line-width',type=float,help='Cura extrusion line width (mm)')
     parser.add_argument('--infill-density',type=float,help='Cura infill percentage')
+    parser.add_argument('--brim-width',type=float,help='Physical bed brim width in mm (post reformation)')
+    parser.add_argument('--brim-gap',type=float,help='Gap from first-layer footprint to brim in mm')
     args = parser.parse_args()
     if any((args.gcode_config, args.start_gcode, args.end_gcode)) and not args.gcode:
         parser.error('G-code configuration and scripts require --gcode')
     cura_values=json.loads(args.gcode_config.read_text()) if args.gcode_config else {}
     for name,value in dict(engine=args.cura,profile=args.cura_profile,layer_height=args.layer_height,
-                           line_width=args.line_width,infill_density=args.infill_density).items():
+                           line_width=args.line_width,infill_density=args.infill_density,
+                           brim_width=args.brim_width,brim_gap=args.brim_gap).items():
         if value is not None:cura_values[name]=value
     cura_values.setdefault('first_layer_height',args.first_layer_height)
     gcode_cfg = CuraConfig(**cura_values)
@@ -69,7 +72,7 @@ def main():
                             tolerance=min(.005,args.min_thickness/10)) if args.layer_mode=='adaptive' else None
     if args.preview_html:
         try:import plotly
-        except ImportError:parser.error('Install s3/requirements-ui.txt for HTML visualization')
+        except ImportError:parser.error('Install requirements-ui.txt for HTML visualization')
     if args.output.exists() and any(args.output.iterdir()):
         parser.error('Output directory must be empty (preserves prior experiments)')
     config_type=PaperConfig if args.implementation=='paper' else SupportFreeConfig

@@ -284,6 +284,19 @@ def test_cantilever_keeps_base_and_grows_from_it():
     assert np.linalg.norm(result['deformed']-mesh.points,axis=1).max()>1
 
 
+def test_small_contact_surface_meshing_noise_still_anchors_base():
+    from pathlib import Path
+    from s3.mesh import read_tet
+    source=read_tet(Path(__file__).parent/'fixtures/cantilever.tet')
+    points=source.points.copy()
+    base=np.flatnonzero(points[:,2]==points[:,2].min())
+    points[base,2]+=np.linspace(0,.001,len(base))
+    mesh=TetMesh(points,source.cells)
+    result=run_paper(mesh,PaperConfig(max_outer_iterations=1))
+    assert set(base).issubset(result['build_plate']['base_vertices'])
+    np.testing.assert_allclose(result['deformed'][base],points[base],atol=1e-12)
+
+
 def test_floating_minimum_plateaus_are_detected():
     from s3.pipeline import floating_minima
     from s3.mesh import read_tet
@@ -294,6 +307,37 @@ def test_floating_minimum_plateaus_are_detected():
     field=mesh.points[:,2].copy()
     field[mesh.points[:,0]==30]=-1
     assert floating_minima(mesh,field,base)
+
+
+def test_elevated_local_minimum_does_not_block_deformation():
+    from pathlib import Path
+    from s3.mesh import read_tet
+    from s3.pipeline import floating_minima
+    source=read_tet(Path(__file__).parent/'fixtures/cantilever.tet')
+    points=source.points.copy()
+    points[20,2]=15.
+    mesh=TetMesh(points,source.cells)
+    base=np.flatnonzero(points[:,2]==0)
+    assert floating_minima(mesh,points[:,2],base)==[20]
+    result=run_paper(mesh,PaperConfig(max_outer_iterations=1,inner_iterations=1))
+    assert result['build_plate']['fixed']
+    assert len(result['history'])==1
+
+
+def test_nonflat_bottom_anchors_lowest_boundary_triangle():
+    from pathlib import Path
+    from s3.mesh import read_tet
+    source=read_tet(Path(__file__).parent/'fixtures/cantilever.tet')
+    angle=np.deg2rad(8)
+    rotation=np.array([[1,0,0],[0,np.cos(angle),-np.sin(angle)],
+                       [0,np.sin(angle),np.cos(angle)]])
+    points=source.points@rotation.T
+    points[:,2]-=points[:,2].min()
+    mesh=TetMesh(points,source.cells)
+    result=run_paper(mesh,PaperConfig(max_outer_iterations=1,inner_iterations=1))
+    base=result['build_plate']['base_vertices']
+    assert len(base)>=3
+    np.testing.assert_allclose(result['deformed'][base],points[base],atol=1e-12)
 
 
 def test_plate_normalization_preserves_nonzero_input_base():

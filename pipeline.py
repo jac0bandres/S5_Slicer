@@ -30,7 +30,6 @@ class PaperConfig:
     exclude_build_plate: bool = True
     fix_build_plate: bool = True
     base_band: float = 0.
-    enforce_build_order: bool = True
     scale_solver: str = 'auto'
     scale_tolerance: float = 1e-9
     scale_max_iterations: int = 5000
@@ -71,11 +70,7 @@ class PaperConfig:
 
 
 def floating_minima(mesh,scalar,base_vertices,edges=None):
-    """Off-base minima of the PL field, including connected equal-value plateaus.
-
-Every such minimum seeds a layer component away from the intended starting
-surface. Absence is a necessary build-order check, not a support/collision proof.
-"""
+    """Diagnostic: off-base minima of the PL field, including equal-value plateaus."""
     if edges is None:
         edges=np.unique(np.sort(np.concatenate([mesh.cells[:,[i,j]] for i in range(4)
                                                for j in range(i+1,4)]),axis=1),axis=0)
@@ -241,6 +236,10 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
     emit('Preparing build-plate constraints')
     base_height=float(mesh.points[:,2].min())
     base_tolerance=1e-8*max(1.,float(np.ptp(mesh.points,axis=0).max()))
+    # Volume meshing can perturb an otherwise planar STL contact patch by a
+    # few thousandths of a millimeter. Allow a small fraction of model height
+    # when identifying flat contact faces, without relaxing below-bed checks.
+    contact_tolerance=max(base_tolerance,5e-4*float(np.ptp(mesh.points[:,2])))
     if cfg.base_band>0:
         # Pin a thin slab of the lowest surface instead of requiring a perfectly
         # flat contact face, so arbitrarily oriented uploads (STLs) still anchor
@@ -249,24 +248,21 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
         boundary_vertices=np.unique(mesh.faces[mesh.boundary])
         base_vertices=boundary_vertices[mesh.points[boundary_vertices,2]<=base_height+cfg.base_band*span]
     else:
-        base_faces=mesh.faces[mesh.boundary]
-        base_faces=base_faces[np.all(np.abs(mesh.points[base_faces,2]-base_height)<=base_tolerance,axis=1)]
+        boundary_faces=mesh.faces[mesh.boundary]
+        base_faces=boundary_faces[np.all(np.abs(mesh.points[boundary_faces,2]-base_height)<=contact_tolerance,axis=1)]
+        if not len(base_faces):
+            # A tilted or curved bottom still needs an anchor for the fixed-base
+            # solve. Use its lowest boundary triangle when no flat patch exists.
+            highest_vertex=mesh.points[boundary_faces,2].max(axis=1)
+            base_faces=boundary_faces[highest_vertex<=highest_vertex.min()+base_tolerance]
         base_vertices=np.unique(base_faces)
     base_cells=np.flatnonzero(np.isin(mesh.cells,base_vertices).sum(axis=1)>=3)
-    if cfg.fix_build_plate and not len(base_vertices):
-        raise ValueError('No flat build-plate contact faces found. Orient the input onto its intended base, '
-                         'raise the build-plate pin band to anchor the lowest surface, or disable fixed build plate '
-                         'for an unconstrained experiment.')
     emit('Preparing fabrication objectives')
     problem=Objectives(mesh,cfg,stress=stress,stress_mask=stress_mask,sq_faces=sq_faces,sf_faces=sf_faces)
     emit(f'Checking mesh connectivity · {len(problem.active):,} active cells')
     points=mesh.points.copy(); points[:,2]-=points[:,2].min()
     edges=np.unique(np.sort(np.concatenate([mesh.cells[:,[i,j]] for i in range(4)
                                            for j in range(i+1,4)]),axis=1),axis=0)
-    if cfg.fix_build_plate and cfg.enforce_build_order and floating_minima(mesh,points[:,2],base_vertices,edges):
-        raise ValueError('The input has a disconnected or elevated starting region that is not connected downward '
-                         'to the build plate. Orient the part so every region drains to the plate, or turn off '
-                         'build-order enforcement to experiment on organic models (some regions may then need support).')
     guide=None
     if cfg.fix_build_plate:
         emit('Computing build-plate distance guide')
@@ -344,9 +340,7 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
                     emit(f'Checking build feasibility · attempt {attempt+1}/25 · step {step:.5g}')
                     candidate=points+step*(proposed-points)
                     determinant=np.linalg.det(np.einsum('cij,cik->ckj',mesh.grad_basis,candidate[mesh.cells]))
-                    if (determinant.min()>1e-6 and candidate[:,2].min()>=-base_tolerance
-                            and (not cfg.enforce_build_order
-                                 or not floating_minima(mesh,candidate[:,2],base_vertices,edges))):
+                    if determinant.min()>1e-6 and candidate[:,2].min()>=-base_tolerance:
                         break
                     step*=.5
                 else:
@@ -373,7 +367,7 @@ def run_paper(mesh,config=None,*,stress=None,stress_mask=None,sq_faces=None,sf_f
                 reason='relative_stagnation';break
             previous=metric
     context=''
-    emit('Finalizing height field and checking build connectivity')
+    emit('Finalizing height field')
     scalar=points[:,2].copy()
     build=dict(fixed=cfg.fix_build_plate,base_vertices=base_vertices.tolist(),
                base_scalar_span=float(np.ptp(scalar[base_vertices])) if len(base_vertices) else None,

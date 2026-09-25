@@ -1,5 +1,5 @@
 -r requirements.txt
-streamlit>=1.63,<2
+streamlit>=1.64,<2
 plotly>=6,<8
 # STL/OBJ/PLY surface upload -> tetrahedral mesh (TetGen).
 tetgen>=0.6

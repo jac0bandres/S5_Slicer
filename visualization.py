@@ -84,10 +84,10 @@ def write_html(path,result,layers,paths,report):
     build=report.get('build_plate')
     if not build or not build.get('fixed'):
         content+='<p><strong>Unconstrained build base:</strong> this run may tilt the part away from its intended starting surface. It is not a validated build sequence.</p>'
-    elif build.get('floating_minimum_vertices') or build.get('below_plate_vertices'):
-        content+='<p><strong>Invalid build start:</strong> the field contains off-base starting regions or material below the plate.</p>'
+    elif build.get('below_plate_vertices'):
+        content+='<p><strong>Below-plate material:</strong> the field places vertices below the fixed plate.</p>'
     else:
-        content+='<p>Build-plate contact is fixed. No below-plate vertices or off-base scalar minima were detected; overhang and coverage checks remain separate.</p>'
+        content+='<p>Build-plate contact is fixed. Elevated local minima are reported for inspection but do not block deformation.</p>'
     content+='<h2>Deformation</h2><p>The slider interpolates the original and final geometry for inspection.</p>'
     content+=deformation.to_html(full_html=False,include_plotlyjs=True)
     content+='<h2>Curved toolpaths</h2><p>Orange: boundary contours. Pink: stress-aligned interiors. Separate strokes have no implied travel connection.</p>'

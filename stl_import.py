@@ -103,7 +103,7 @@ def repair_surface(points, faces, notes=None):
         import pymeshfix
     except ImportError:
         record.append('pymeshfix is not installed; skipped self-intersection repair '
-                      '(pip install -r s3/requirements-repair.txt).')
+                      '(pip install -r requirements-repair.txt).')
         return v, f
     fix = pymeshfix.MeshFix(v, f)
     fix.repair(joincomp=True, remove_smallest_components=False)
