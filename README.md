@@ -1,26 +1,52 @@
 # S³ Slicer
 
-The S³ implementation is the main project. Its code, workbench, requirements,
-tests, and validation data live at the repository root. The former S4/S5 work is
-archived under [`research/`](research/README.md).
-The small `s3/` compatibility package keeps `python -m s3` and existing
-`s3.*` imports working with the root-level modules.
+An experimental Python implementation of the deformation and curved-layer ideas
+in [*S³-Slicer: A General Slicing Framework for Multi-Axis 3D Printing*](https://doi.org/10.1145/3550454.3555516)
+by Zhang and colleagues. It computes a deformation of a tetrahedral model,
+transfers deformed height back to the original shape, and exposes curved layers
+and contour toolpaths for inspection. For printer G-code, it also has a separate
+Cura → S4/S5 reformation path for a Core R Theta style machine.
 
-Paper-based S³ deformation with SF/SR/SQ constraints, scale-controlled geometry,
-and scalar isosurfaces. This is being developed in validated stages;
-[PORT_STATUS.md](PORT_STATUS.md) defines what is implemented and what remains.
-The visual pipeline includes fixed-count or adaptive layers, boundary-contour
-toolpaths, and stress-directed hybrid toolpaths. Full paper-result replication,
-coverage validation and collision-checked printer motion remain unfinished.
-Printer export uses Cura slicing with S4/S5 tetrahedral G-code reformation.
+**Research status:** this is a work in progress. Toolpath coverage, collision
+clearance, machine limits, and the paper's full experimental results have not
+been validated. See [implementation status](PORT_STATUS.md) before interpreting
+an export as a printable result.
 
-Uses NumPy and SciPy. The archived S5 implementation in
-[`research/s5/S5.py`](research/s5/S5.py) remains separate from the S³ numerical pipeline.
+## Squirtle walkthrough
+
+These are renders from a test using the included
+[Squirtle STL](research/s5/input_models/Squirtle.stl). The surface was simplified
+from 12,000 to 1,440 triangles, tetrahedralized to 15,230 cells, scaled to half
+size, centered, and dropped to the bed. The
+[figure script](docs/figures/render_squirtle.py) records the exact settings.
+
+![Original Squirtle mesh beside its S³ deformation](docs/figures/squirtle_deformation.png)
+
+*Input volume mesh and the S³ deformation. The solver stopped after two outer
+iterations by relative stagnation; its worst remaining angle violation was
+59.9°. This is a diagnostic result, not a support-free success.*
+
+![Curved-layer contour paths on Squirtle](docs/figures/squirtle_contours.png)
+
+*Nine diagnostic curved layers yielded 49 contour strokes. These research
+paths show the scalar isosurfaces; they are not the paths used for Cura G-code.*
+
+![Cura paths on deformed Squirtle and reformed paths in the original geometry](docs/figures/squirtle_reformation.png)
+
+*Selected Cura deposition layers on the deformed mesh (left) and the
+reconstructed nozzle-tip paths from reformed S4/S5 machine G-code (right).
+The Cura run produced 32 layers. The image does not establish printability.*
+
+## Quick start
+
+Run these commands from the repository root. Python 3.12 is specified in
+[`.python-version`](.python-version). The command-line pipeline accepts a
+tetrahedral `.tet` mesh; the workbench can also tetrahedralize an STL/OBJ/PLY/OFF
+surface such as Squirtle.
 
 ```bash
 python3 -m venv .venv-s3
 .venv-s3/bin/python -m pip install -r requirements.txt
-.venv-s3/bin/python -m pytest tests -q
 
 .venv-s3/bin/python -m s3 tests/fixtures/cantilever.tet \
     -o output/s3_cantilever --layers 12
@@ -33,35 +59,21 @@ python3 -m venv .venv-s3
 .venv-s3/bin/python -m streamlit run streamlit_app.py
 ```
 
-1. Choose a tetrahedral mesh, or upload an STL/OBJ/PLY/OFF surface — surfaces are
-   tetrahedralized on upload. **Automatic mesh repair** (on by default, and the same
-   tiered fallback S5.py uses) tries TetGen on the surface as uploaded, then on a
-   repaired copy (trimesh cleanup and hole filling, then MeshFix for
-   self-intersections), then FloatTetWild, which ingests broken input directly. A
-   tier whose result no longer spans the input bounding box is rejected, so repair
-   cannot silently drop part of a multi-part model. Each attempt runs in a forked
-   child process because both backends can segfault on pathological surfaces. The
-   repair tiers need `requirements-repair.txt` (pulled in by
-   `requirements-ui.txt`); without it only the first tier runs. In **Scale, rotate and place**, adjust uniform
-   scale (%), X/Y/Z angles (degrees), XY centering, or XY placement offsets (mm).
-   **Drop model to bed** moves its lowest point to Z=0. Rotations use the bounding
-   box center and apply X, then Y, then Z after input up-axis conversion. The
-   **Live input preview** stays visible as controls change and shows dimensions,
-   the Z=0 plane, and colored guides for the file's XYZ axes.
-   **Reset placement** restores defaults. Then run **Run paper pipeline**.
-   The workbench caches the tetrahedral mesh by uploaded file, format, and repair
-   setting. Changes to rotation, scale, up axis, and placement reuse that mesh;
-   changing the file or repair setting generates a new volume mesh.
-   **Fix build-plate contact surface** is enabled by default: place the intended
-   flat base at the input's minimum Z (or choose Y-up before conversion).
-2. Inspect **Geometry**, including the original-to-deformed interpolation slider.
-
-3. Open **Cura slicing**, adjust print settings, and click **Slice with Cura**.
-   The selected tab is retained when inputs change.
-4. **Diagnostics** shows the deformation history and build-plate checks.
-5. **Prepare ZIP** in **Download** exports deformation arrays, `deformed.tet`,
-   and `report.json`. The undeformed tetrahedral mesh can be downloaded before
-   running the pipeline, with the current placement applied.
+1. Choose a `.tet` volume mesh or upload an STL/OBJ/PLY/OFF surface. Uploaded
+   surfaces are tetrahedralized. Automatic repair tries TetGen, TetGen after
+   surface repair, then FloatTetWild. The fallback needs
+   `requirements-repair.txt`, which `requirements-ui.txt` includes.
+2. Use **Scale, rotate and place** to orient the model, set its size, and put the
+   intended contact surface on the bed. The live preview shows the placed model.
+   **Fix build-plate contact surface** is enabled by default. The workbench
+   caches the volume mesh while placement controls change.
+3. Click **Run paper pipeline**. Inspect **Geometry** with the deformation
+   slider and check **Diagnostics** for convergence and build-plate results.
+4. Optionally open **Cura slicing** to adjust print settings and click
+   **Slice with Cura**. This is a separate path from the research contours.
+5. Use **Download** to export deformation arrays, `deformed.tet`, `report.json`,
+   and any Cura outputs. The placed input volume mesh can be downloaded before
+   running the pipeline.
 
 Research layer and toolpath generation remains available through the CLI:
 
@@ -116,9 +128,6 @@ checked; nonconvergence fails the run without silently switching to LU. Residual
 tolerance is not a geometric-error bound for ill-conditioned meshes. Use direct
 LU for comparison when evaluating a new model. A running solve must finish or be
 stopped before restarting with changed settings.
-
-Create a local environment as `.venv-s3` if needed. On minimal
-Debian installations, creating another environment may require `python3-venv`.
 
 Official `.tet` datasets are Y-up; request the coordinate conversion explicitly:
 
@@ -216,7 +225,7 @@ precedence over the bundled fallback definitions, as in S5.
 # CuraEngine and its matching definitions must be installed on the host.
 # Debian/Ubuntu: sudo apt install cura-engine cura
 .venv-s3/bin/python -m pip install -r requirements-cura.txt
-.venv/bin/python -m s3 model.tet -o output/s3_cura --gcode \
+.venv-s3/bin/python -m s3 model.tet -o output/s3_cura --gcode \
     --layer-height .2 --line-width .4 --infill-density 20 --brim-width 6
 ```
 
@@ -284,3 +293,20 @@ The actual layer count comes from Cura, not the research diagnostic count.
 The previous `s3.gcode` research-stroke writer remains available as a legacy API,
 but neither the workbench nor `--gcode` uses it. Research layers and toolpaths
 remain available through the CLI/API; they are not workbench tabs.
+
+## Credits and provenance
+
+- **S³ research:** Tianyu Zhang, Guoxin Fang, Yuming Huang, Neelotpal Dutta,
+  Sylvain Lefebvre, Zekai Murat Kilic, and Charlie C. L. Wang,
+  [*S³-Slicer: A General Slicing Framework for Multi-Axis 3D Printing*](https://doi.org/10.1145/3550454.3555516),
+  ACM Transactions on Graphics 41(6), article 277 (2022). See the
+  [authors' project and source](https://github.com/zhangty019/S3_DeformFDM)
+  and its [BSD-3-Clause license](LICENSE.upstream). This Python implementation
+  follows the paper in validated stages; it is not an exact port of the C++ code.
+- **S4 and Core R Theta:** [Joshua Bird's S4 Slicer](https://github.com/jyjblrd/S4_Slicer)
+  supplied the reference methods behind the S4/S5 G-code reformation adapter.
+  The output targets the kinematics of Bird's
+  [Core R Theta 4-axis printer](https://github.com/jyjblrd/Core-R-Theta-4-Axis-Printer).
+  The archived [S4 reference](research/s4/s4_reference.py) and
+  [S5 research implementation](research/s5/README.md) are kept under `research/`.
+  The S4-derived code is GPL-3.0; see the repository [license](LICENSE).
